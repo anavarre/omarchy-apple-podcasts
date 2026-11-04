@@ -61,9 +61,8 @@ Panel {
   readonly property var speedChoices: Model.speedChoices
   property bool speedOpen: false
   readonly property bool isPlaying: root.playerState === "playing"
-  // The focused player replaces the list while it is up; Escape goes back.
-  property bool playerOpen: false
-  readonly property bool showPlayer: root.playerOpen && root.nowPlaying !== null
+  // Playback controls live in the now playing card above the list.
+  readonly property bool showPlayer: root.nowPlaying !== null
     && root.signedIn && !root.showAccount && !root.showSettings
 
   // The Settings view, reached from the footer or with ",". It replaces the
@@ -194,7 +193,6 @@ Panel {
     if (root.opened) {
       root.accountOpen = false
       root.settingsOpen = false
-      root.playerOpen = false
       root.speedOpen = false
       root.showPlayed = false
       root.selected = 0
@@ -217,7 +215,6 @@ Panel {
     var e = root.listed[index]
     if (!e) return
     root.podcasts.play(e)
-    root.playerOpen = true
   }
 
   onListedChanged: root.selected = Math.max(0, Math.min(root.listed.length - 1, root.selected))
@@ -279,7 +276,7 @@ Panel {
       // doesn't drive the list underneath it.
       blocked: root.showSignIn
       onMoveRequested: function(dx, dy) {
-        if (root.showPlayer) {
+        if (root.showPlayer && dy === 0) {
           if (dx < 0) root.podcasts.skip(-root.skipBack)
           else if (dx > 0) root.podcasts.skip(root.skipForward)
         }
@@ -288,24 +285,20 @@ Panel {
       onActivateRequested: {
         if (root.showAccount) { root.podcasts.forget(); root.accountOpen = false }
         else if (root.showSettings) root.settingsOpen = false
-        else if (root.showPlayer) root.podcasts.togglePlay()
+        else if (root.showPlayer && root.podcasts.sameEpisode(root.nowPlaying, root.listed[root.selected])) root.podcasts.togglePlay()
         else root.openEpisode(root.selected)
       }
       onCloseRequested: {
         if (root.showAccount) root.accountOpen = false
         else if (root.showSettings) root.settingsOpen = false
         else if (root.showPlayer && root.speedOpen) root.speedOpen = false
-        else if (root.showPlayer) root.playerOpen = false
         else if (root.showPlayed) { root.showPlayed = false; root.selected = 0 }
         else root.close()
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
-        if (root.showPlayer) {
-          if (text === "o" && root.nowPlaying && root.nowPlaying.url !== "") root.podcasts.openUrl(root.nowPlaying.url)
-          else if (text === "s") { root.podcasts.stopPlayback(); root.playerOpen = false }
-          return
-        }
+        if (root.showPlayer && text === "o" && root.nowPlaying.url !== "") { root.podcasts.openUrl(root.nowPlaying.url); return }
+        if (root.showPlayer && text === "s") { root.podcasts.stopPlayback(); return }
         if (text === "r") root.podcasts.refresh()
         else if (text === "p" && !root.showAccount && !root.showSettings) { root.showPlayed = !root.showPlayed; root.selected = 0 }
         else if (text === "m" && !root.showAccount && !root.showSettings && !root.showPlayed) {
@@ -718,190 +711,11 @@ Panel {
           }
         }
 
-        // -------------------------------------------------------------- player
-        Column {
-          width: parent.width
-          spacing: Style.space(10)
-          visible: root.showPlayer
-
-          Text {
-            text: "← Episodes  (Esc)"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: root.fs(Style.font.bodySmall)
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.playerOpen = false }
-          }
-
-          ArtImage {
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: Style.space(160)
-            height: width
-            url: root.nowPlaying ? (root.nowPlaying.artworkLarge || root.nowPlaying.artwork) : ""
-          }
-
-          Text {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            maximumLineCount: 3
-            elide: Text.ElideRight
-            textFormat: Text.PlainText
-            text: root.nowPlaying ? root.nowPlaying.title : ""
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: root.fs(Style.font.subtitle)
-            font.bold: true
-          }
-
-          Text {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            elide: Text.ElideRight
-            textFormat: Text.PlainText
-            visible: text !== ""
-            text: root.nowPlaying ? root.nowPlaying.show : ""
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: root.fs(Style.font.body)
-          }
-
-          // Progress: click anywhere on the bar to jump there.
-          Item {
-            id: progress
-            width: parent.width
-            height: Style.space(18)
-
-            Rectangle {
-              anchors.verticalCenter: parent.verticalCenter
-              width: parent.width
-              height: Style.space(4)
-              radius: height / 2
-              color: Qt.alpha(root.foreground, 0.2)
-              Rectangle {
-                width: root.duration > 0 ? parent.width * Math.min(1, root.position / root.duration) : 0
-                height: parent.height
-                radius: parent.radius
-                color: root.accent
-              }
-            }
-            MouseArea {
-              anchors.fill: parent
-              cursorShape: Qt.PointingHandCursor
-              onClicked: function(mouse) { root.seekFromClick(mouse.x, progress.width) }
-            }
-          }
-
-          Item {
-            width: parent.width
-            height: clockLeft.implicitHeight
-            Text {
-              id: clockLeft
-              text: Model.formatClock(root.position)
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: root.fs(Style.font.bodySmall)
-            }
-            Text {
-              anchors.right: parent.right
-              text: root.duration > 0 ? "-" + Model.formatClock(root.duration - root.position) : ""
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: root.fs(Style.font.bodySmall)
-            }
-          }
-
-          // The play button sits at the exact centre, under the artwork; the
-          // other buttons hang off either side of it, so the speed button may
-          // end up off-centre.
-          Item {
-            width: parent.width
-            height: playButton.height
-            Button {
-              id: speedButton
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.right: backButton.left
-              anchors.rightMargin: Style.space(10)
-              text: Model.formatSpeed(root.speed)
-              tooltipText: "Playback speed"
-              active: root.speedOpen
-              onClicked: root.speedOpen = !root.speedOpen
-            }
-            Button {
-              id: backButton
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.right: playButton.left
-              anchors.rightMargin: Style.space(10)
-              text: "\u2212" + root.skipBack + "s"
-              tooltipText: "Back " + root.skipBack + " seconds (\u2190)"
-              enabled: root.playerState !== "ended"
-              onClicked: root.podcasts.skip(-root.skipBack)
-            }
-            Button {
-              id: playButton
-              anchors.centerIn: parent
-              iconText: root.playerState === "ended" ? "\uf01e" : root.isPlaying ? "\uf04c" : root.playerState === "buffering" ? "\uf110" : "\uf04b"
-              iconSpinning: root.playerState === "buffering"
-              iconSize: Style.font.icon * 1.8
-              horizontalPadding: Style.space(16)
-              verticalPadding: Style.space(8)
-              tooltipText: (root.playerState === "ended" ? "Replay" : root.isPlaying ? "Pause" : "Play") + " (Space)"
-              onClicked: root.podcasts.togglePlay()
-            }
-            Button {
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.left: playButton.right
-              anchors.leftMargin: Style.space(10)
-              text: "+" + root.skipForward + "s"
-              tooltipText: "Forward " + root.skipForward + " seconds (\u2192)"
-              enabled: root.playerState !== "ended"
-              onClicked: root.podcasts.skip(root.skipForward)
-            }
-          }
-
-          // The speed choices, shown under the buttons while the speed button
-          // is open; picking one applies it and closes the row.
-          Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: Style.space(6)
-            visible: root.speedOpen
-            Repeater {
-              model: root.speedChoices
-              Button {
-                required property var modelData
-                text: Model.formatSpeed(modelData)
-                selected: modelData === root.speed
-                onClicked: { root.podcasts.setSpeed(modelData); root.speedOpen = false }
-              }
-            }
-          }
-
-          Text {
-            width: parent.width
-            visible: root.playError !== ""
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
-            text: root.playError
-            color: root.urgent
-            font.family: root.fontFamily
-            font.pixelSize: root.fs(Style.font.bodySmall)
-          }
-
-          Text {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: root.fs(Style.font.bodySmall)
-            text: "Space play/pause · ←/→ skip · o open in Apple Podcasts · s stop"
-          }
-        }
-
         // ---------------------------------------------------------------- list
         Column {
           width: parent.width
           spacing: Style.space(4)
-          visible: root.signedIn && !root.showAccount && !root.showSettings && !root.showPlayer
+          visible: root.signedIn && !root.showAccount && !root.showSettings
 
           // What is playing: a card pinned above the list, with transport
           // controls so it can be paused or skipped without opening the player.
@@ -918,35 +732,31 @@ Panel {
 
           Rectangle {
             width: parent.width
-            height: nowColumn.implicitHeight + Style.space(20)
+            height: nowIcon.height + nowColumn.implicitHeight + Style.space(30)
             radius: Style.space(8)
             visible: root.nowPlaying !== null
             color: Qt.alpha(root.accent, 0.18)
             border.width: 1
             border.color: root.accent
 
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.playerOpen = true }
-
             ArtImage {
               id: nowIcon
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.left: parent.left
-              anchors.leftMargin: Style.space(10)
-              width: visible ? Style.space(56) : 0
+              anchors.top: parent.top
+              anchors.topMargin: Style.space(10)
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: visible ? Style.space(160) : 0
               height: width
-              url: root.nowPlaying ? (root.nowPlaying.artwork || root.nowPlaying.artworkLarge) : ""
-              sourceSize: Qt.size(Style.space(112), Style.space(112))
+              url: root.nowPlaying ? (root.nowPlaying.artworkLarge || root.nowPlaying.artwork) : ""
             }
 
             Column {
               id: nowColumn
-              anchors.left: nowIcon.right
-              anchors.leftMargin: nowIcon.visible ? Style.space(10) : 0
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(10)
               anchors.right: parent.right
               anchors.rightMargin: Style.space(10)
-              anchors.verticalCenter: parent.verticalCenter
+              anchors.top: nowIcon.bottom
               anchors.topMargin: Style.space(10)
-              anchors.bottomMargin: Style.space(10)
               spacing: Style.space(6)
 
               Text {
@@ -1048,7 +858,7 @@ Panel {
 
           Text {
             width: parent.width
-            visible: root.playError !== "" && !root.showPlayer
+            visible: root.playError !== ""
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
             text: root.playError
@@ -1238,7 +1048,7 @@ Panel {
         // -------------------------------------------------------------- footer
         Row {
           spacing: Style.space(14)
-          visible: root.signedIn && !root.showPlayer
+          visible: root.signedIn
           Text {
             text: root.loading ? "Refreshing…" : "r Refresh"
             color: root.dim

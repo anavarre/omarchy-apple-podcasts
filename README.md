@@ -42,15 +42,15 @@ The token is stored privately on your computer in `~/.config/omarchy/apple-podca
 
 ## Using it
 
-Click an episode to open the player.
+Click an episode to play it. While something plays, a card with large artwork and the controls sits above the list.
 
 | Key | Action |
 | --- | --- |
-| `Space` | Play / pause |
+| `Space` / `Enter` | Play the selected episode; pause or resume it if it is already playing |
 | `←` / `→` | Skip back / forward |
 | `o` | Open the episode on Apple's site |
 | `s` | Stop |
-| `Esc` | Back to the list |
+| `Esc` | Close the panel |
 | `p` | Switch between unplayed and played episodes |
 | `m` | Mark the selected episode as played, without listening to it |
 | `,` | Settings |
