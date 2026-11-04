@@ -121,7 +121,7 @@ Panel {
   // The list shows one page at a time; reaching its end (arrow keys or a click
   // on the arrow below it) reveals the next page. A page is 20 episodes, or 15
   // while one is playing (the now-playing card takes room).
-  readonly property int pageSize: root.nowPlaying !== null ? 15 : 20
+  readonly property int pageSize: root.nowPlaying !== null ? 10 : 15
   property int visibleCount: root.pageSize
   readonly property var shown: root.listed.slice(0, root.visibleCount)
   readonly property bool hasMore: root.listed.length > root.visibleCount
@@ -942,7 +942,7 @@ Panel {
           Flickable {
             id: listView
             width: parent.width
-            height: Math.max(listView.listPeak, Math.min(listColumn.implicitHeight, Style.space(380)))
+            height: Math.max(listView.listPeak, Math.min(listColumn.implicitHeight, listView.maxHeight))
             contentHeight: listColumn.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -951,7 +951,20 @@ Panel {
             // Tallest the list has been since the panel opened, so loading
             // another page never resizes the window.
             property real listPeak: 0
-            onContentHeightChanged: listPeak = Math.max(listPeak, Math.min(contentHeight, Style.space(380)))
+
+            // Room for the list: whatever the screen leaves after the rest of
+            // the panel (player card, headers, footer). chrome is sampled
+            // rather than bound, because content.implicitHeight includes this
+            // list and a binding would loop.
+            property real chrome: 0
+            readonly property real maxHeight: Math.max(Style.space(120),
+              panel.availableCardHeight - panel.verticalContentInset - listView.chrome)
+            Connections {
+              target: content
+              function onImplicitHeightChanged() { listView.chrome = content.implicitHeight - listView.height }
+            }
+            onMaxHeightChanged: listPeak = Math.min(listPeak, maxHeight)
+            onContentHeightChanged: listPeak = Math.max(listPeak, Math.min(contentHeight, maxHeight))
             Connections {
               target: root
               function onOpenedChanged() { if (root.opened) listView.listPeak = 0 }
