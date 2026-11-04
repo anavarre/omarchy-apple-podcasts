@@ -63,7 +63,7 @@ Click an episode to play it. While something plays, a card with large artwork an
 
 Open them from the panel (`,`) or from Omarchy's bar settings:
 
-- Episodes to show (1–50)
+- Episodes per page (1–30): the panel lists this many, and more load as you arrow past the end or click the pulsing arrow
 - Refresh interval
 - Latest episodes or your Up Next queue
 - Started episodes first, and how the rest is ordered (by show or by date)

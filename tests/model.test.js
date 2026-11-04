@@ -11,7 +11,7 @@ const M = ctx;
 
 test("clampEpisodeLimit", () => {
   assert.strictEqual(M.clampEpisodeLimit(0), 1);
-  assert.strictEqual(M.clampEpisodeLimit(999), 50);
+  assert.strictEqual(M.clampEpisodeLimit(999), 30);
   assert.strictEqual(M.clampEpisodeLimit("x"), 10);
   assert.strictEqual(M.clampEpisodeLimit(7.4), 7);
 });

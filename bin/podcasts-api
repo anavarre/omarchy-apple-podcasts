@@ -261,7 +261,7 @@ cmd_getposall() {
 cmd_episodes() {
   local limit="${1:-}" src="${2:-latest}" ep
   case "$limit" in ''|*[!0-9]*) usage 'episodes: LIMIT must be a number' ;; esac
-  [ "$limit" -ge 1 ] && [ "$limit" -le 50 ] || usage 'episodes: LIMIT must be 1-50'
+  [ "$limit" -ge 1 ] && [ "$limit" -le 30 ] || usage 'episodes: LIMIT must be 1-30'
   case "$src" in
     latest) ep=/v1/me/library/latest-episodes ;;
     up-next) ep=/v1/me/library/next-episodes ;;

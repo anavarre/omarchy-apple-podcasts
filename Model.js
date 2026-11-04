@@ -4,7 +4,7 @@
 // QML types so they can be unit-tested with node (tests/model.test.js).
 
 var episodeLimitMin = 1
-var episodeLimitMax = 50
+var episodeLimitMax = 30
 var refreshChoices = [30, 60, 120, 180, 360, 720, 1440]
 var sources = ["latest", "up-next"]
 // How the unplayed list is ordered once anything in progress is pinned on top.

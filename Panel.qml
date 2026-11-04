@@ -118,6 +118,17 @@ Panel {
     }), root.podcasts.positions, { inProgressFirst: root.inProgressFirst, order: root.sortOrder,
       currentId: root.nowPlaying ? root.nowPlaying.id : "" })
 
+  // The list shows one page at a time; reaching its end (arrow keys or a click
+  // on the arrow below it) reveals the next page. A page is 20 episodes, or 15
+  // while one is playing (the now-playing card takes room).
+  readonly property int pageSize: root.nowPlaying !== null ? 15 : 20
+  property int visibleCount: root.pageSize
+  readonly property var shown: root.listed.slice(0, root.visibleCount)
+  readonly property bool hasMore: root.listed.length > root.visibleCount
+  function showMore() {
+    if (root.hasMore) root.visibleCount = Math.min(root.listed.length, root.visibleCount + root.pageSize)
+  }
+
   // Whether any listed episode was started and left, which the header mentions.
   readonly property bool hasInProgress: root.listed.some(function(e) {
     return Model.inProgress(root.podcasts.positions[e.id], e.durationMs)
@@ -196,6 +207,7 @@ Panel {
       root.speedOpen = false
       root.showPlayed = false
       root.selected = 0
+      root.visibleCount = root.pageSize
       if (root.signedIn) root.podcasts.refresh()
     }
   }
@@ -208,7 +220,8 @@ Panel {
 
   function moveSelection(dy) {
     if (root.listed.length === 0) return
-    root.selected = Math.max(0, Math.min(root.listed.length - 1, root.selected + dy))
+    if (dy > 0 && root.selected >= root.visibleCount - 1) root.showMore()
+    root.selected = Math.max(0, Math.min(Math.min(root.listed.length, root.visibleCount) - 1, root.selected + dy))
   }
 
   function openEpisode(index) {
@@ -217,7 +230,9 @@ Panel {
     root.podcasts.play(e)
   }
 
-  onListedChanged: root.selected = Math.max(0, Math.min(root.listed.length - 1, root.selected))
+  onListedChanged: root.selected = Math.max(0, Math.min(root.shown.length - 1, root.selected))
+  onPageSizeChanged: root.visibleCount = root.pageSize
+  onShowPlayedChanged: root.visibleCount = root.pageSize
 
   // Settings take effect at once on the service and are written to shell.json
   // through the bar widget, which owns the entry; without a widget (or a shell
@@ -887,161 +902,242 @@ Panel {
             font.pixelSize: root.fs(Style.font.body)
           }
 
-          Repeater {
-            model: root.listed
+          // The list keeps a fixed height: more episodes extend what scrolls
+          // inside it (wheel, drag or arrow keys) instead of growing the panel.
+          Flickable {
+            id: listView
+            width: parent.width
+            height: Math.max(listView.listPeak, Math.min(listColumn.implicitHeight, Style.space(380)))
+            contentHeight: listColumn.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            visible: root.listed.length > 0
 
-            Rectangle {
-              id: row
-              required property int index
-              required property var modelData
-              width: parent.width
-              height: rowText.implicitHeight + Style.space(12)
-              radius: Style.space(6)
-              color: row.index === root.selected ? Qt.alpha(root.accent, 0.18) : "transparent"
+            // Tallest the list has been since the panel opened, so loading
+            // another page never resizes the window.
+            property real listPeak: 0
+            onContentHeightChanged: listPeak = Math.max(listPeak, Math.min(contentHeight, Style.space(380)))
+            Connections {
+              target: root
+              function onOpenedChanged() { if (root.opened) listView.listPeak = 0 }
+              function onShowPlayedChanged() { listView.listPeak = 0 }
+            }
 
-              // Episodes of one show share the same artwork URL, and Image's pixmap
-              // cache keeps the decoded bitmap in memory, so each icon is fetched
-              // once however many rows use it.
-              ArtImage {
-                id: rowIcon
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(8)
-                width: visible ? Style.space(32) : 0
-                height: width
-                url: row.modelData.artwork || row.modelData.artworkLarge
-                sourceSize: Qt.size(Style.space(64), Style.space(64))
-              }
+            function revealSelected() {
+              var item = rows.itemAt(root.selected)
+              if (!item) return
+              if (item.y < contentY) contentY = item.y
+              else if (item.y + item.height > contentY + height) contentY = item.y + item.height - height
+            }
+            Connections {
+              target: root
+              function onSelectedChanged() { listView.revealSelected() }
+            }
+            onAtYEndChanged: if (atYEnd && moving) root.showMore()
 
-              Column {
-                id: rowText
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: rowIcon.right
-                anchors.right: parent.right
-                anchors.margins: Style.space(8)
-                spacing: Style.space(2)
+            Column {
+              id: listColumn
+              width: listView.width
+              spacing: Style.space(4)
 
-                // The selected row's title scrolls sideways when it doesn't fit.
-                Item {
-                  width: parent.width
-                  height: titleBox.height
+              Repeater {
+                id: rows
+                model: root.shown
 
-                Item {
-                  id: titleBox
-                  width: Math.min(rowTitle.implicitWidth, parent.width - (rowDone.visible ? rowDone.implicitWidth + Style.space(6) : 0))
-                  height: rowTitle.implicitHeight
-                  clip: true
-                  readonly property real overflow: rowTitle.implicitWidth - width
-                  readonly property bool scrolling: row.index === root.selected && overflow > 0
-
-                  Text {
-                    id: rowTitle
-                    width: titleBox.scrolling ? implicitWidth : parent.width
-                    elide: titleBox.scrolling ? Text.ElideNone : Text.ElideRight
-                    wrapMode: Text.NoWrap
-                    textFormat: Text.PlainText
-                    text: row.modelData.title
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fs(Style.font.body)
-                  }
-
-                  SequentialAnimation {
-                    running: titleBox.scrolling
-                    loops: Animation.Infinite
-                    onRunningChanged: if (!running) rowTitle.x = 0
-                    PauseAnimation { duration: 1200 }
-                    NumberAnimation {
-                      target: rowTitle
-                      property: "x"
-                      from: 0
-                      to: -titleBox.overflow
-                      duration: Math.max(1000, titleBox.overflow * 25)
-                      easing.type: Easing.InOutSine
-                    }
-                    PauseAnimation { duration: 1200 }
-                    NumberAnimation {
-                      target: rowTitle
-                      property: "x"
-                      to: 0
-                      duration: Math.max(1000, titleBox.overflow * 25)
-                      easing.type: Easing.InOutSine
-                    }
-                  }
-                }
-
-                // A finished episode that is still listed.
-                Text {
-                  id: rowDone
-                  anchors.left: titleBox.right
-                  anchors.leftMargin: Style.space(6)
-                  anchors.verticalCenter: titleBox.verticalCenter
-                  visible: !root.showPlayed && root.finishedRecently(row.modelData)
-                  text: "\u2713"
-                  color: "#2ea043"
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fs(Style.font.body)
-                  font.bold: true
-                }
-                }
-                Text {
-                  width: parent.width
-                  elide: Text.ElideRight
-                  textFormat: Text.PlainText
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fs(Style.font.bodySmall)
-                  text: [row.modelData.show, Model.relativeAge(row.modelData.published),
-                    Model.formatDuration(row.modelData.durationMs),
-                    Model.resumeLabel(root.positionOf(row.modelData), row.modelData.durationMs)].filter(function(s) { return s !== "" }).join(" · ")
-                }
                 Rectangle {
-                  readonly property real fraction: Model.progressFraction(root.podcasts.positions[row.modelData.id], row.modelData.durationMs)
+                  id: row
+                  required property int index
+                  required property var modelData
                   width: parent.width
-                  height: Style.space(3)
-                  radius: height / 2
-                  visible: fraction > 0
-                  color: Qt.alpha(root.foreground, 0.2)
+                  height: rowText.implicitHeight + Style.space(12)
+                  radius: Style.space(6)
+                  color: row.index === root.selected ? Qt.alpha(root.accent, 0.18) : "transparent"
+                  opacity: 0
+                  Component.onCompleted: opacity = 1
+                  Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+
+                  // Episodes of one show share the same artwork URL, and Image's pixmap
+                  // cache keeps the decoded bitmap in memory, so each icon is fetched
+                  // once however many rows use it.
+                  ArtImage {
+                    id: rowIcon
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(8)
+                    width: visible ? Style.space(32) : 0
+                    height: width
+                    url: row.modelData.artwork || row.modelData.artworkLarge
+                    sourceSize: Qt.size(Style.space(64), Style.space(64))
+                  }
+
+                  Column {
+                    id: rowText
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: rowIcon.right
+                    anchors.right: parent.right
+                    anchors.margins: Style.space(8)
+                    spacing: Style.space(2)
+
+                    // The selected row's title scrolls sideways when it doesn't fit.
+                    Item {
+                      width: parent.width
+                      height: titleBox.height
+
+                    Item {
+                      id: titleBox
+                      width: Math.min(rowTitle.implicitWidth, parent.width - (rowDone.visible ? rowDone.implicitWidth + Style.space(6) : 0))
+                      height: rowTitle.implicitHeight
+                      clip: true
+                      readonly property real overflow: rowTitle.implicitWidth - width
+                      readonly property bool scrolling: row.index === root.selected && overflow > 0
+
+                      Text {
+                        id: rowTitle
+                        width: titleBox.scrolling ? implicitWidth : parent.width
+                        elide: titleBox.scrolling ? Text.ElideNone : Text.ElideRight
+                        wrapMode: Text.NoWrap
+                        textFormat: Text.PlainText
+                        text: row.modelData.title
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: root.fs(Style.font.body)
+                      }
+
+                      SequentialAnimation {
+                        running: titleBox.scrolling
+                        loops: Animation.Infinite
+                        onRunningChanged: if (!running) rowTitle.x = 0
+                        PauseAnimation { duration: 1200 }
+                        NumberAnimation {
+                          target: rowTitle
+                          property: "x"
+                          from: 0
+                          to: -titleBox.overflow
+                          duration: Math.max(1000, titleBox.overflow * 25)
+                          easing.type: Easing.InOutSine
+                        }
+                        PauseAnimation { duration: 1200 }
+                        NumberAnimation {
+                          target: rowTitle
+                          property: "x"
+                          to: 0
+                          duration: Math.max(1000, titleBox.overflow * 25)
+                          easing.type: Easing.InOutSine
+                        }
+                      }
+                    }
+
+                    // A finished episode that is still listed.
+                    Text {
+                      id: rowDone
+                      anchors.left: titleBox.right
+                      anchors.leftMargin: Style.space(6)
+                      anchors.verticalCenter: titleBox.verticalCenter
+                      visible: !root.showPlayed && root.finishedRecently(row.modelData)
+                      text: "\u2713"
+                      color: "#2ea043"
+                      font.family: root.fontFamily
+                      font.pixelSize: root.fs(Style.font.body)
+                      font.bold: true
+                    }
+                    }
+                    Text {
+                      width: parent.width
+                      elide: Text.ElideRight
+                      textFormat: Text.PlainText
+                      color: root.dim
+                      font.family: root.fontFamily
+                      font.pixelSize: root.fs(Style.font.bodySmall)
+                      text: [row.modelData.show, Model.relativeAge(row.modelData.published),
+                        Model.formatDuration(row.modelData.durationMs),
+                        Model.resumeLabel(root.positionOf(row.modelData), row.modelData.durationMs)].filter(function(s) { return s !== "" }).join(" · ")
+                    }
+                    Rectangle {
+                      readonly property real fraction: Model.progressFraction(root.podcasts.positions[row.modelData.id], row.modelData.durationMs)
+                      width: parent.width
+                      height: Style.space(3)
+                      radius: height / 2
+                      visible: fraction > 0
+                      color: Qt.alpha(root.foreground, 0.2)
+                      Rectangle {
+                        width: parent.width * parent.fraction
+                        height: parent.height
+                        radius: parent.radius
+                        color: root.accent
+                      }
+                    }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onEntered: root.selected = row.index
+                    onClicked: root.openEpisode(row.index)
+                  }
+
+                  // Play straight from the list: the icon turns into a button on hover.
                   Rectangle {
-                    width: parent.width * parent.fraction
-                    height: parent.height
-                    radius: parent.radius
-                    color: root.accent
+                    id: rowPlay
+                    anchors.fill: rowIcon
+                    visible: rowIconHover.containsMouse
+                    radius: Style.space(4)
+                    color: Qt.rgba(0, 0, 0, 0.55)
+                    Text {
+                      anchors.centerIn: parent
+                      text: ""
+                      color: "white"
+                      font.family: root.fontFamily
+                      font.pixelSize: root.fs(Style.font.body)
+                    }
+                  }
+                  MouseArea {
+                    id: rowIconHover
+                    anchors.fill: rowIcon
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: root.selected = row.index
+                    onClicked: root.podcasts.play(root.listed[row.index])
                   }
                 }
-              }
-
-              MouseArea {
-                anchors.fill: parent
-                hoverEnabled: true
-                onEntered: root.selected = row.index
-                onClicked: root.openEpisode(row.index)
-              }
-
-              // Play straight from the list: the icon turns into a button on hover.
-              Rectangle {
-                id: rowPlay
-                anchors.fill: rowIcon
-                visible: rowIconHover.containsMouse
-                radius: Style.space(4)
-                color: Qt.rgba(0, 0, 0, 0.55)
-                Text {
-                  anchors.centerIn: parent
-                  text: ""
-                  color: "white"
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fs(Style.font.body)
-                }
-              }
-              MouseArea {
-                id: rowIconHover
-                anchors.fill: rowIcon
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onEntered: root.selected = row.index
-                onClicked: root.podcasts.play(root.listed[row.index])
               }
             }
+          }
+        }
+
+        // A quiet arrow that breathes under the list while more is waiting.
+        Item {
+          width: parent.width
+          height: moreText.implicitHeight + Style.space(10)
+          visible: root.hasMore
+          Text {
+            id: moreText
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: moreHover.containsMouse ? 0 : bob
+            property real bob: 0
+            text: "\u25BE  " + Math.min(root.pageSize, root.listed.length - root.visibleCount) + " more"
+            color: moreHover.containsMouse ? root.accent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.bodySmall)
+            SequentialAnimation on opacity {
+              running: root.hasMore && root.opened
+              loops: Animation.Infinite
+              NumberAnimation { from: 0.45; to: 1; duration: 1100; easing.type: Easing.InOutSine }
+              NumberAnimation { from: 1; to: 0.45; duration: 1100; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on bob {
+              running: root.hasMore && root.opened
+              loops: Animation.Infinite
+              NumberAnimation { from: 0; to: 2; duration: 1100; easing.type: Easing.InOutSine }
+              NumberAnimation { from: 2; to: 0; duration: 1100; easing.type: Easing.InOutSine }
+            }
+          }
+          MouseArea {
+            id: moreHover
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.showMore()
+            onWheel: function(wheel) { if (wheel.angleDelta.y < 0) root.showMore(); wheel.accepted = false }
           }
         }
 

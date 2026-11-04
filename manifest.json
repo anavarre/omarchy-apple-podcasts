@@ -39,12 +39,12 @@
       {
         "key": "episodeLimit",
         "type": "integer",
-        "label": "Episodes to show",
+        "label": "Episodes per page",
         "min": 1,
-        "max": 50,
+        "max": 30,
         "step": 1,
         "defaultValue": 10,
-        "description": "How many episodes the panel lists, 1 to 50."
+        "description": "How many episodes the panel lists before offering more, 1 to 30."
       },
       {
         "key": "refreshMinutes",

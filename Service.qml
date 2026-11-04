@@ -18,6 +18,7 @@ Item {
   readonly property string player: Model.localPath(Qt.resolvedUrl("bin/podcasts-player"))
 
   // Pushed in by the bar widget, the only side the shell injects settings into.
+  // How many episodes the panel shows at a time; all of them are fetched.
   property int episodeLimit: 10
   property int refreshMinutes: 60
   property string source: "latest"
@@ -63,7 +64,6 @@ Item {
   property bool refreshQueued: false
   property bool playedDirty: false
 
-  onEpisodeLimitChanged: refreshSoon()
   onSourceChanged: refreshSoon()
   onRefreshMinutesChanged: timer.restart()
 
@@ -138,7 +138,7 @@ Item {
     root.loading = true
     episodesProcess.session = root.session
     episodesProcess.command = ["/usr/bin/bash", root.api, "episodes",
-      String(Model.clampEpisodeLimit(root.episodeLimit)), Model.knownSource(root.source)]
+      String(Model.episodeLimitMax), Model.knownSource(root.source)]
     episodesProcess.running = true
   }
 
@@ -179,7 +179,7 @@ Item {
 
   function refreshPositions() {
     if (root.episodes.length === 0) return
-    var ids = root.episodes.slice(0, 30).map(function(e) { return e.id }).filter(function(id) { return /^[0-9]+$/.test(id) })
+    var ids = root.episodes.slice(0, Model.episodeLimitMax).map(function(e) { return e.id }).filter(function(id) { return /^[0-9]+$/.test(id) })
     if (ids.length === 0) return
     // This machine's own record first: it needs no network or sign-in.
     if (!localLoadProcess.running) {
