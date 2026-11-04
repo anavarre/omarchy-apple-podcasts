@@ -33,7 +33,7 @@ BarWidget {
     root.service.refreshMinutes = Model.snapRefreshMinutes(root.setting("refreshMinutes", 60))
     root.service.source = Model.knownSource(root.setting("source", "latest"))
     root.service.skipBackSeconds = Model.knownSkip(root.setting("skipBackSeconds", 15), 15)
-    root.service.skipForwardSeconds = Model.knownSkip(root.setting("skipForwardSeconds", 15), 15)
+    root.service.skipForwardSeconds = Model.knownSkip(root.setting("skipForwardSeconds", 30), 30)
     root.service.inProgressFirst = root.setting("inProgressFirst", true) === true
     root.service.sortOrder = Model.knownSortOrder(root.setting("sortOrder", "feed"))
     root.service.keepFinishedDays = Model.knownKeepDays(root.setting("keepFinishedDays", 1))

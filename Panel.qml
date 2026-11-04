@@ -170,7 +170,7 @@ Panel {
     readonly property real duration: 0
     readonly property string playError: ""
     readonly property int skipBackSeconds: 15
-    readonly property int skipForwardSeconds: 15
+    readonly property int skipForwardSeconds: 30
     property bool inProgressFirst: true
     property string sortOrder: "feed"
     property int keepFinishedDays: 1

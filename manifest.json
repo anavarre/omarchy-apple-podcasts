@@ -29,7 +29,7 @@
       "refreshMinutes": 60,
       "source": "latest",
       "skipBackSeconds": 15,
-      "skipForwardSeconds": 15,
+      "skipForwardSeconds": 30,
       "inProgressFirst": true,
       "sortOrder": "feed",
       "keepFinishedDays": 1,
@@ -145,7 +145,7 @@
           75,
           90
         ],
-        "defaultValue": 15,
+        "defaultValue": 30,
         "description": "How far the forward button jumps. Apple's clients offer 10, 15, 30, 45, 60, 75 or 90."
       }
     ]

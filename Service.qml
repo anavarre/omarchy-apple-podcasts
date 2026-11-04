@@ -23,7 +23,7 @@ Item {
   property string source: "latest"
   // Seconds the skip buttons jump, from the lengths Apple's clients offer.
   property int skipBackSeconds: 15
-  property int skipForwardSeconds: 15
+  property int skipForwardSeconds: 30
   // How the panel orders the list (Model.sortEpisodes): started episodes on
   // top, then by show or by date.
   property bool inProgressFirst: true
