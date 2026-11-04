@@ -774,15 +774,50 @@ Panel {
               anchors.topMargin: Style.space(10)
               spacing: Style.space(6)
 
-              Text {
+              // The title scrolls sideways, continuously, when it doesn't fit.
+              Item {
+                id: nowTitleBox
                 width: parent.width
-                elide: Text.ElideRight
-                textFormat: Text.PlainText
-                text: root.nowPlaying ? root.nowPlaying.title : ""
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: root.fs(Style.font.subtitle)
-                font.bold: true
+                height: nowTitle.implicitHeight
+                clip: true
+                readonly property real overflow: nowTitle.implicitWidth - width
+                readonly property bool scrolling: overflow > 0
+
+                Text {
+                  id: nowTitle
+                  width: nowTitleBox.scrolling ? implicitWidth : parent.width
+                  elide: Text.ElideNone
+                  wrapMode: Text.NoWrap
+                  textFormat: Text.PlainText
+                  text: root.nowPlaying ? root.nowPlaying.title : ""
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: root.fs(Style.font.subtitle)
+                  font.bold: true
+                }
+
+                SequentialAnimation {
+                  running: nowTitleBox.scrolling
+                  loops: Animation.Infinite
+                  onRunningChanged: if (!running) nowTitle.x = 0
+                  PauseAnimation { duration: 1200 }
+                  NumberAnimation {
+                    target: nowTitle
+                    property: "x"
+                    from: 0
+                    to: -nowTitleBox.overflow
+                    duration: Math.max(1000, nowTitleBox.overflow * 25)
+                    easing.type: Easing.InOutSine
+                  }
+                  PauseAnimation { duration: 1200 }
+                  NumberAnimation {
+                    target: nowTitle
+                    property: "x"
+                    to: 0
+                    duration: Math.max(1000, nowTitleBox.overflow * 25)
+                    easing.type: Easing.InOutSine
+                  }
+                }
               }
               Text {
                 width: parent.width
