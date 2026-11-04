@@ -54,6 +54,7 @@ Click an episode to play it. While something plays, a card with large artwork an
 | `p` | Switch between unplayed and played episodes |
 | `m` | Mark the selected episode as played, without listening to it |
 | `,` | Settings |
+| `?` | Show the shortcuts (also the `?` icon at the bottom right) |
 
 - **Resume anywhere.** Your position syncs with Apple, so you can switch between your iPhone and this computer.
 - **Started episodes come first**, most recently listened to on top. The rest is grouped by show, or sorted by date if you prefer.

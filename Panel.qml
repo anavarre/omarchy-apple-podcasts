@@ -69,6 +69,26 @@ Panel {
   // list while it is up and holds what is worth changing without leaving the
   // panel: how the list is ordered and the playback speed.
   property bool settingsOpen: false
+
+  // The shortcuts cheat sheet, opened with "?" or the footer's question mark.
+  // It floats over whatever is up so you can read a binding without losing
+  // your place in the list.
+  property bool shortcutsOpen: false
+  readonly property var shortcuts: [
+    { keys: "↑ / ↓", what: "Move the selection" },
+    { keys: "Space / Enter", what: "Play the selected episode, or pause / resume" },
+    { keys: "← / →", what: "Skip back / forward" },
+    { keys: "o", what: "Open the episode on Apple's site" },
+    { keys: "s", what: "Stop" },
+    { keys: "r", what: "Refresh now" },
+    { keys: "p", what: "Switch between unplayed and played" },
+    { keys: "m", what: "Mark the selected episode as played" },
+    { keys: ",", what: "Settings" },
+    { keys: "c", what: "Account" },
+    { keys: "Tab", what: "Switch to the next panel" },
+    { keys: "?", what: "Show or hide this list" },
+    { keys: "Esc", what: "Close" }
+  ]
   readonly property bool showSettings: root.settingsOpen && root.signedIn && !root.showAccount
   readonly property bool inProgressFirst: root.podcasts.inProgressFirst === true
   readonly property string sortOrder: Model.knownSortOrder(root.podcasts.sortOrder)
@@ -204,6 +224,7 @@ Panel {
     if (root.opened) {
       root.accountOpen = false
       root.settingsOpen = false
+      root.shortcutsOpen = false
       root.speedOpen = false
       root.showPlayed = false
       root.selected = 0
@@ -282,7 +303,10 @@ Panel {
     open: root.opened
     focusTarget: root.showSignIn ? tokenField : keys
     contentWidth: root.cardWidth
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    // The cheat sheet floats over the content, so the panel must be tall
+    // enough to hold it.
+    contentHeight: panel.fittedContentHeight(Math.max(content.implicitHeight,
+      root.shortcutsOpen ? shortcutsSheet.implicitHeight : 0))
 
     PanelKeyCatcher {
       id: keys
@@ -304,7 +328,8 @@ Panel {
         else root.openEpisode(root.selected)
       }
       onCloseRequested: {
-        if (root.showAccount) root.accountOpen = false
+        if (root.shortcutsOpen) root.shortcutsOpen = false
+        else if (root.showAccount) root.accountOpen = false
         else if (root.showSettings) root.settingsOpen = false
         else if (root.showPlayer && root.speedOpen) root.speedOpen = false
         else if (root.showPlayed) { root.showPlayed = false; root.selected = 0 }
@@ -322,6 +347,7 @@ Panel {
         }
         else if (text === "c") root.accountOpen = !root.accountOpen
         else if (text === ",") root.settingsOpen = !root.settingsOpen
+        else if (text === "?") root.shortcutsOpen = !root.shortcutsOpen
       }
 
       Column {
@@ -1207,9 +1233,27 @@ Panel {
         }
 
         // -------------------------------------------------------------- footer
-        Row {
-          spacing: Style.space(14)
+        Item {
+          width: parent.width
+          height: Math.max(footerRow.height, helpButton.implicitHeight)
           visible: root.signedIn
+
+          PanelActionButton {
+            id: helpButton
+            anchors.right: parent.right
+            anchors.verticalCenter: footerRow.verticalCenter
+            // nf-fa-question_circle (U+F059)
+            iconText: "\uf059"
+            tooltipText: "Keyboard shortcuts (?)"
+            foreground: root.shortcutsOpen ? root.foreground : root.dim
+            hoverColor: root.foreground
+            fontSize: root.fs(Style.font.body)
+            onClicked: root.shortcutsOpen = !root.shortcutsOpen
+          }
+
+        Row {
+          id: footerRow
+          spacing: Style.space(14)
           Text {
             text: root.loading ? "Refreshing…" : "r Refresh"
             color: root.dim
@@ -1250,6 +1294,94 @@ Panel {
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: root.fs(Style.font.bodySmall)
+          }
+        }
+        }
+      }
+
+      // ------------------------------------------------ shortcuts cheat sheet
+      // Sits over the content instead of in the layout, so opening it never
+      // resizes the panel or scrolls the list out from under you.
+      Rectangle {
+        id: shortcutsSheet
+        anchors.fill: parent
+        z: 10
+        visible: root.shortcutsOpen
+        implicitHeight: shortcutsColumn.implicitHeight
+        color: Color.popups.background
+        radius: Style.space(4)
+
+        HoverHandler {}
+        TapHandler { onTapped: root.shortcutsOpen = false }
+
+        Column {
+          id: shortcutsColumn
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          spacing: Style.space(6)
+
+          Item {
+            width: parent.width
+            height: Math.max(shortcutsHeading.implicitHeight, shortcutsClose.implicitHeight)
+
+            Text {
+              id: shortcutsHeading
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Keyboard shortcuts"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.subtitle)
+              font.bold: true
+            }
+
+            PanelActionButton {
+              id: shortcutsClose
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              // nf-fa-times (U+F00D)
+              iconText: "\uf00d"
+              tooltipText: "Close"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontSize: root.fs(Style.font.bodySmall)
+              onClicked: root.shortcutsOpen = false
+            }
+          }
+
+          Repeater {
+            model: root.shortcuts
+
+            Item {
+              id: shortcutRow
+              required property var modelData
+
+              width: parent.width
+              height: Math.max(keyLabel.implicitHeight, whatLabel.implicitHeight)
+
+              Text {
+                id: keyLabel
+                anchors.left: parent.left
+                width: Style.space(Math.round(100 * root.textScale))
+                text: shortcutRow.modelData.keys
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: root.fs(Style.font.bodySmall)
+                font.bold: true
+              }
+
+              Text {
+                id: whatLabel
+                anchors.left: keyLabel.right
+                anchors.right: parent.right
+                text: shortcutRow.modelData.what
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: root.fs(Style.font.bodySmall)
+                elide: Text.ElideRight
+              }
+            }
           }
         }
       }
