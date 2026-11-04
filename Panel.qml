@@ -840,6 +840,14 @@ Panel {
                   radius: parent.radius
                   color: root.accent
                 }
+                MouseArea {
+                  anchors.fill: parent
+                  anchors.topMargin: -Style.space(6)
+                  anchors.bottomMargin: -Style.space(6)
+                  enabled: root.duration > 0
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: function(mouse) { root.seekFromClick(mouse.x, width) }
+                }
               }
               Row {
                 spacing: Style.space(8)
