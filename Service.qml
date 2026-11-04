@@ -86,7 +86,22 @@ Item {
     var e = root.nowPlaying
     if (!e || e.id !== "" || e.title === "") return
     var known = root.knownEpisodeByTitle(e.title)
-    if (known) root.nowPlaying = known
+    if (known) { root.nowPlaying = known; return }
+    // Not in any loaded list: fall back to the episode kept on disk.
+    var kept = root.keptNowPlaying
+    if (kept && kept.title.replace(/[\x00-\x1F\x7F]/g, "").slice(0, 200) === e.title) root.nowPlaying = kept
+  }
+
+  property var keptNowPlaying: null
+
+  onNowPlayingChanged: {
+    var e = root.nowPlaying
+    if (!root.hasToken || !e || e.id === "") return
+    nowSaveProcess.payload = JSON.stringify(e)
+    nowSaveProcess.running = false
+    nowSaveProcess.stdinEnabled = true
+    nowSaveProcess.command = ["/usr/bin/bash", root.api, "saveplayed", "now"]
+    nowSaveProcess.running = true
   }
 
   // Played: episodes Apple reports as completed (from the feed or the one
@@ -542,7 +557,7 @@ Item {
       try { info = JSON.parse(configOut.text) } catch (e) { info = {} }
       root.hasToken = info.hasToken === true
       root.storeDir = Model.text(info.store)
-      if (root.hasToken) { root.refresh(); playedGetProcess.command = ["/usr/bin/bash", root.api, "getplayed"]; playedGetProcess.running = true }
+      if (root.hasToken) { root.refresh(); playedGetProcess.command = ["/usr/bin/bash", root.api, "getplayed"]; playedGetProcess.running = true; nowGetProcess.command = ["/usr/bin/bash", root.api, "getplayed", "now"]; nowGetProcess.running = true }
       else root.authState = "signedOut"
     }
   }
@@ -565,6 +580,35 @@ Item {
       if (extra.length === 0) return
       root.playedEpisodes = root.playedEpisodes.concat(extra).slice(0, root.playedLimit)
       root.refreshPositions()
+    }
+  }
+
+  Process {
+    id: nowSaveProcess
+    property string payload: ""
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdinEnabled: true
+    onStarted: { write(payload); payload = ""; stdinEnabled = false }
+  }
+
+  Process {
+    id: nowGetProcess
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdout: StdioCollector { id: nowGetOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var o = null
+      try { o = JSON.parse(nowGetOut.text) } catch (e) { o = null }
+      if (!o || typeof o !== "object") return
+      var ep = Model.sanitizeEpisode(o)
+      if (ep.id === "") return
+      root.keptNowPlaying = ep
+      root.restoreNowPlaying()
     }
   }
 

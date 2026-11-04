@@ -200,20 +200,22 @@ cmd_forget() {
   refuseUnsafe
   rm -f "$store/media-user-token" "$store/dev-token"
   rm -rf "$store/positions"
-  rm -f "$store/played.json"
+  rm -f "$store/played.json" "$store/nowplaying.json"
 }
 
 cmd_saveplayed() {
-  local t
+  local t name=played.json
+  [ "${1:-}" = now ] && name=nowplaying.json
   refuseUnsafe
   mkdir -p "$store" && chmod 700 "$store" || { printf 'Could not create %s.\n' "$store" >&2; exit 24; }
   t=$(mktemp "$store/.tmp.XXXXXX") || exit 24
-  if head -c "$maxbytes" > "$t" && mv -f "$t" "$store/played.json"; then return 0; fi
+  if head -c "$maxbytes" > "$t" && mv -f "$t" "$store/$name"; then return 0; fi
   rm -f "$t"; exit 24
 }
 
 cmd_getplayed() {
   local f="$store/played.json"
+  [ "${1:-}" = now ] && f="$store/nowplaying.json"
   [ -f "$f" ] && [ ! -L "$f" ] && head -c "$maxbytes" "$f"
   return 0
 }
@@ -299,8 +301,8 @@ case "$cmd" in
   savepos) cmd_savepos "$@" ;;
   getpos) cmd_getpos "$@" ;;
   getposall) cmd_getposall "$@" ;;
-  saveplayed) cmd_saveplayed ;;
-  getplayed) cmd_getplayed ;;
+  saveplayed) cmd_saveplayed "$@" ;;
+  getplayed) cmd_getplayed "$@" ;;
   forget) cmd_forget ;;
   *) usage "unknown command: $cmd" ;;
 esac
