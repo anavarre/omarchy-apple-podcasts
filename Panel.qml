@@ -882,6 +882,15 @@ Panel {
                   font.family: root.fontFamily
                   font.pixelSize: root.fs(Style.font.bodySmall)
                 }
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: root.playerState === "ended"
+                  text: "✓"
+                  color: "#2ea043"
+                  font.family: root.fontFamily
+                  font.pixelSize: root.fs(Style.font.body)
+                  font.bold: true
+                }
               }
               Row {
                 spacing: Style.space(6)
