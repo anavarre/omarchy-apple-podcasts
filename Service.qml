@@ -29,6 +29,7 @@ Item {
   // top, then by show or by date.
   property bool inProgressFirst: true
   property string sortOrder: "feed"
+  property bool groupByFeed: true
   property int keepFinishedDays: 1
 
   // "unknown" until the first check, then "ok" or "signedOut". "offline" means

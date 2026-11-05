@@ -184,6 +184,9 @@ test("sortEpisodes", () => {
   // Nothing pinned: plain feed / date orders.
   assert.deepStrictEqual(ids(M.sortEpisodes(feed, positions, { inProgressFirst: false, order: "feed" })), ["2", "4", "1", "3", "5"]);
   assert.deepStrictEqual(ids(M.sortEpisodes(feed, positions, { inProgressFirst: false, order: "date" })), ["1", "2", "3", "4", "5"]);
+  // groupByFeed overrides order.
+  assert.deepStrictEqual(ids(M.sortEpisodes(feed, positions, { inProgressFirst: false, groupByFeed: false })), ["1", "2", "3", "4", "5"]);
+  assert.deepStrictEqual(ids(M.sortEpisodes(feed, positions, { inProgressFirst: false, groupByFeed: true, order: "date" })), ["2", "4", "1", "3", "5"]);
   // The episode playing now leads from its first second, before any saved position.
   assert.deepStrictEqual(ids(M.sortEpisodes(feed, positions, { order: "feed", currentId: "5" })), ["5", "4", "3", "2", "1"]);
   // Defaults: in progress first, by feed; odd input is harmless and the list is not changed.

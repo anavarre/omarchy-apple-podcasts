@@ -31,7 +31,7 @@
       "skipBackSeconds": 15,
       "skipForwardSeconds": 30,
       "inProgressFirst": true,
-      "sortOrder": "feed",
+      "groupByFeed": true,
       "keepFinishedDays": 1,
       "textSize": "medium"
     },
@@ -81,15 +81,11 @@
         "description": "Pins every episode you have started, and the one playing, to the top of the list, most recently listened to first."
       },
       {
-        "key": "sortOrder",
-        "type": "enum",
-        "label": "Then order by",
-        "options": [
-          "feed",
-          "date"
-        ],
-        "defaultValue": "feed",
-        "description": "How the rest of the list is ordered: by show (feed), newest first within each, or by date across shows."
+        "key": "groupByFeed",
+        "type": "boolean",
+        "label": "Group by podcast feed",
+        "defaultValue": true,
+        "description": "Groups the list by show, newest first within each; off orders by date across shows."
       },
       {
         "key": "keepFinishedDays",

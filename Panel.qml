@@ -92,7 +92,7 @@ Panel {
   readonly property bool showSettings: root.settingsOpen && root.signedIn && !root.showAccount
   readonly property bool inProgressFirst: root.podcasts.inProgressFirst === true
   readonly property string sortOrder: Model.knownSortOrder(root.podcasts.sortOrder)
-  readonly property var sortOrders: Model.sortOrders
+  readonly property bool groupByFeed: root.podcasts.groupByFeed !== false
   readonly property int keepFinishedDays: Model.knownKeepDays(root.podcasts.keepFinishedDays)
   readonly property var keepDaysChoices: Model.keepDaysChoices
   // The clock the "finished within N days" test reads, refreshed while the
@@ -135,7 +135,7 @@ Panel {
       var pos = root.positionOf(e)
       if (pos ? pos.completed === true : root.podcasts.playedSet[e.id] === true) return root.finishedRecently(e)
       return true
-    }), root.podcasts.positions, { inProgressFirst: root.inProgressFirst, order: root.sortOrder,
+    }), root.podcasts.positions, { inProgressFirst: root.inProgressFirst, groupByFeed: root.groupByFeed,
       currentId: root.nowPlaying ? root.nowPlaying.id : "" })
 
   // The list shows one page at a time; reaching its end (arrow keys or a click
@@ -203,6 +203,7 @@ Panel {
     readonly property int skipForwardSeconds: 30
     property bool inProgressFirst: true
     property string sortOrder: "feed"
+    property bool groupByFeed: true
     property int keepFinishedDays: 1
     property bool playerVisible: false
     readonly property real speed: 1
@@ -263,10 +264,9 @@ Panel {
     if (root.hostWidget && typeof root.hostWidget.saveInProgressFirst === "function") root.hostWidget.saveInProgressFirst(on === true)
   }
 
-  function setSortOrder(order) {
-    var next = Model.knownSortOrder(order)
-    if (root.service) root.service.sortOrder = next
-    if (root.hostWidget && typeof root.hostWidget.saveSortOrder === "function") root.hostWidget.saveSortOrder(next)
+  function setGroupByFeed(on) {
+    if (root.service) root.service.groupByFeed = on === true
+    if (root.hostWidget && typeof root.hostWidget.saveGroupByFeed === "function") root.hostWidget.saveGroupByFeed(on === true)
   }
 
   function setKeepFinishedDays(days) {
@@ -282,8 +282,6 @@ Panel {
     root.textSize = next
     if (root.hostWidget && typeof root.hostWidget.saveTextSize === "function") root.hostWidget.saveTextSize(next)
   }
-
-  function sortOrderLabel(order) { return order === "date" ? "Date" : "Feed" }
 
   function seekFromClick(x, width) {
     if (root.duration > 0 && width > 0) root.podcasts.seekTo(root.duration * Math.max(0, Math.min(1, x / width)))
@@ -506,17 +504,17 @@ Panel {
 
           Item {
             width: parent.width
-            height: Math.max(orderCaption.implicitHeight, orderButtons.implicitHeight)
+            height: Math.max(groupCaption.implicitHeight, settingsColumn.controlHeight)
 
             Column {
-              id: orderCaption
+              id: groupCaption
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - orderButtons.width - Style.space(8)
+              width: parent.width - groupSwitch.width - Style.space(8)
               spacing: Style.space(2)
               Text {
                 width: parent.width
-                text: root.inProgressFirst ? "Then order by" : "Order by"
+                text: "Group by podcast feed"
                 elide: Text.ElideRight
                 color: root.foreground
                 font.family: root.fontFamily
@@ -525,27 +523,23 @@ Panel {
               Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: root.sortOrder === "date" ? "Newest first, across shows." : "Grouped by show, newest first within each."
+                text: root.groupByFeed ? "Grouped by show, newest first within each." : "Newest first, across shows."
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: root.fs(Style.font.bodySmall)
               }
             }
 
-            Row {
-              id: orderButtons
+            ToggleSwitch {
+              id: groupSwitch
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(6)
-              Repeater {
-                model: root.sortOrders
-                Button {
-                  required property var modelData
-                  text: root.sortOrderLabel(modelData)
-                  selected: modelData === root.sortOrder
-                  onClicked: root.setSortOrder(modelData)
-                }
-              }
+              checked: root.groupByFeed
+              cursorRing: false
+              trackHeight: Math.round(settingsColumn.controlHeight)
+              foreground: root.foreground
+              accent: root.accent
+              onToggled: root.setGroupByFeed(!root.groupByFeed)
             }
           }
 
@@ -875,32 +869,49 @@ Panel {
                   onClicked: function(mouse) { root.seekFromClick(mouse.x, width) }
                 }
               }
-              Row {
-                spacing: Style.space(8)
-                Button {
-                  text: Model.formatSpeed(root.speed)
-                  tooltipText: "Playback speed"
-                  active: root.speedOpen
-                  onClicked: root.speedOpen = !root.speedOpen
+              // The play/pause button sits at the exact center; the others hang off it.
+              Item {
+                width: parent.width
+                height: playButton.height
+                Row {
+                  anchors.right: playButton.left
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(8)
+                  Button {
+                    text: Model.formatSpeed(root.speed)
+                    tooltipText: "Playback speed"
+                    active: root.speedOpen
+                    onClicked: root.speedOpen = !root.speedOpen
+                  }
+                  Button {
+                    text: "−" + root.skipBack + "s"
+                    tooltipText: "Back " + root.skipBack + " seconds"
+                    enabled: root.playerState !== "ended"
+                    onClicked: root.podcasts.skip(-root.skipBack)
+                  }
                 }
                 Button {
-                  text: "−" + root.skipBack + "s"
-                  tooltipText: "Back " + root.skipBack + " seconds"
-                  enabled: root.playerState !== "ended"
-                  onClicked: root.podcasts.skip(-root.skipBack)
-                }
-                Button {
+                  id: playButton
+                  anchors.horizontalCenter: parent.horizontalCenter
                   iconText: root.playerState === "ended" ? "\uf01e" : root.isPlaying ? "\uf04c" : root.playerState === "buffering" ? "\uf110" : "\uf04b"
                   iconSpinning: root.playerState === "buffering"
                   tooltipText: root.playerState === "ended" ? "Replay" : root.isPlaying ? "Pause" : "Play"
                   onClicked: root.podcasts.togglePlay()
                 }
                 Button {
+                  anchors.left: playButton.right
+                  anchors.leftMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
                   text: "+" + root.skipForward + "s"
                   tooltipText: "Forward " + root.skipForward + " seconds"
                   enabled: root.playerState !== "ended"
                   onClicked: root.podcasts.skip(root.skipForward)
                 }
+              }
+              Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Style.space(8)
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
                   text: Model.formatClock(root.position) + (root.duration > 0 ? " / " + Model.formatClock(root.duration) : "")
@@ -919,6 +930,7 @@ Panel {
                 }
               }
               Row {
+                anchors.horizontalCenter: parent.horizontalCenter
                 spacing: Style.space(6)
                 visible: root.speedOpen
                 Repeater {

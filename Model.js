@@ -286,7 +286,7 @@ function progressFraction(pos, durationMs) {
 // has been started (and the one playing now, `currentId`, from its first
 // second) sits on top, the most recently listened to first, so what you are in
 // the middle of is never buried under new arrivals. The rest follows `order`:
-// "feed" groups episodes by show (A to Z, newest first within a show), "date"
+// `groupByFeed` (or, when unset, order "feed") groups episodes by show (A to Z, newest first within a show), "date"
 // is newest first across shows, the order Apple sends. Sorting is stable, so
 // ties keep the feed's order. The input is not changed.
 function sortEpisodes(episodes, positions, options) {
@@ -295,6 +295,7 @@ function sortEpisodes(episodes, positions, options) {
   var opts = options || {}
   var pinFirst = opts.inProgressFirst !== false
   var order = knownSortOrder(opts.order)
+  var group = typeof opts.groupByFeed === "boolean" ? opts.groupByFeed : order === "feed"
   var current = episodeId(opts.currentId)
   var keyed = list.map(function(e, i) {
     var p = e && e.id !== "" ? pos[e.id] : undefined
@@ -308,7 +309,7 @@ function sortEpisodes(episodes, positions, options) {
   keyed.sort(function(a, b) {
     if (a.started !== b.started) return a.started ? -1 : 1
     if (a.started && a.at !== b.at) return a.at > b.at ? -1 : 1
-    if (order === "feed" && a.show !== b.show) return a.show < b.show ? -1 : 1
+    if (group && a.show !== b.show) return a.show < b.show ? -1 : 1
     if (a.date !== b.date) return a.date > b.date ? -1 : 1
     return a.i - b.i
   })

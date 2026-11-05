@@ -57,7 +57,7 @@ Click an episode to play it. While something plays, a card with large artwork an
 | `?` | Show the shortcuts (also the `?` icon at the bottom right) |
 
 - **Resume anywhere.** Your position syncs with Apple, so you can switch between your iPhone and this computer.
-- **Started episodes come first**, most recently listened to on top. The rest is grouped by show, or sorted by date if you prefer.
+- **Started episodes come first**, most recently listened to on top. The rest is grouped by podcast feed (the "Group by podcast feed" setting), or sorted by date across shows when that is off.
 - **Subscriber-only episodes** can't be played here; the panel says so.
 
 ## Settings

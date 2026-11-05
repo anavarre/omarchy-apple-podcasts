@@ -36,6 +36,7 @@ BarWidget {
     root.service.skipForwardSeconds = Model.knownSkip(root.setting("skipForwardSeconds", 30), 30)
     root.service.inProgressFirst = root.setting("inProgressFirst", true) === true
     root.service.sortOrder = Model.knownSortOrder(root.setting("sortOrder", "feed"))
+    root.service.groupByFeed = root.setting("groupByFeed", root.setting("sortOrder", "feed") !== "date") === true
     root.service.keepFinishedDays = Model.knownKeepDays(root.setting("keepFinishedDays", 1))
   }
 
@@ -51,6 +52,7 @@ BarWidget {
   }
 
   function saveInProgressFirst(on) { root.saveSetting("inProgressFirst", on === true) }
+  function saveGroupByFeed(on) { root.saveSetting("groupByFeed", on === true) }
   function saveSortOrder(order) { root.saveSetting("sortOrder", Model.knownSortOrder(order)) }
   function saveKeepFinishedDays(days) { root.saveSetting("keepFinishedDays", Model.knownKeepDays(days)) }
   function saveTextSize(size) { root.saveSetting("textSize", Model.knownTextSize(size)) }
