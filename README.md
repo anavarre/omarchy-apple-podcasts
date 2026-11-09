@@ -49,6 +49,9 @@ Click an episode to play it. While something plays, a card with large artwork an
 | `Space` / `Enter` | Play the selected episode; pause or resume it if it is already playing |
 | `←` / `→` | Skip back / forward |
 | `o` | Open the episode on Apple's site |
+| `n` | Queue the selected episode; it starts by itself when the current one ends (or right away if nothing is playing) |
+| `Shift` + `R` | Remove the selected episode from the queue |
+| `Enter` | On a section title (Queue, Unplayed, Played), collapse or expand the section |
 | `s` | Stop |
 | `Esc` | Close the panel |
 | `p` | Switch between unplayed and played episodes |

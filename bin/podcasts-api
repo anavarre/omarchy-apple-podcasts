@@ -22,6 +22,7 @@
 #   saveplayed           read a JSON array of played episodes from stdin and keep
 #                        it on this machine, so the played list outlives the feed
 #   getplayed            print what saveplayed kept, or nothing
+#                        (saveplayed/getplayed also take "now" or "queue")
 #   forget               delete everything this plugin stored
 #
 # UNOFFICIAL. Apple publishes no API for a listener's library. This talks to
@@ -200,12 +201,13 @@ cmd_forget() {
   refuseUnsafe
   rm -f "$store/media-user-token" "$store/dev-token"
   rm -rf "$store/positions"
-  rm -f "$store/played.json" "$store/nowplaying.json"
+  rm -f "$store/played.json" "$store/nowplaying.json" "$store/queue.json"
 }
 
 cmd_saveplayed() {
   local t name=played.json
   [ "${1:-}" = now ] && name=nowplaying.json
+  [ "${1:-}" = queue ] && name=queue.json
   refuseUnsafe
   mkdir -p "$store" && chmod 700 "$store" || { printf 'Could not create %s.\n' "$store" >&2; exit 24; }
   t=$(mktemp "$store/.tmp.XXXXXX") || exit 24
@@ -216,6 +218,7 @@ cmd_saveplayed() {
 cmd_getplayed() {
   local f="$store/played.json"
   [ "${1:-}" = now ] && f="$store/nowplaying.json"
+  [ "${1:-}" = queue ] && f="$store/queue.json"
   [ -f "$f" ] && [ ! -L "$f" ] && head -c "$maxbytes" "$f"
   return 0
 }

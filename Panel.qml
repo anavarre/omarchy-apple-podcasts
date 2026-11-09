@@ -79,6 +79,9 @@ Panel {
     { keys: "Space / Enter", what: "Play the selected episode, or pause / resume" },
     { keys: "← / →", what: "Skip back / forward" },
     { keys: "o", what: "Open the episode on Apple's site" },
+    { keys: "n", what: "Queue the selected episode to play next" },
+    { keys: "Shift + R", what: "Remove the selected episode from the queue" },
+    { keys: "Enter", what: "On a section title, collapse or expand the section" },
     { keys: "s", what: "Stop" },
     { keys: "r", what: "Refresh now" },
     { keys: "p", what: "Switch between unplayed and played" },
@@ -117,6 +120,14 @@ Panel {
   // Played view (p). The episode in the now playing card leaves it too, until
   // stopped.
   property bool showPlayed: false
+  // Sections of the list that are folded away, by key ("queue", "main").
+  property var collapsed: ({})
+  function isCollapsed(key) { return root.collapsed[key] === true }
+  function toggleSection(key) {
+    var c = Object.assign({}, root.collapsed)
+    c[key] = !c[key]
+    root.collapsed = c
+  }
   // Where an episode was left; every read of a position in the list goes here.
   function positionOf(e) {
     // TEMP-TEST: pretend the Moicano Nolan fight finished 12 hours ago.
@@ -124,35 +135,63 @@ Panel {
       return { ms: 0, completed: true, at: root.now - 0.5 * 86400000 }
     return root.podcasts.positions[e.id]
   }
+  function isQueued(e) {
+    return root.podcasts.queue.some(function(q) { return root.podcasts.sameEpisode(q, e) })
+  }
   function finishedRecently(e) {
     return Model.recentlyFinished(root.positionOf(e), root.now, root.keepFinishedDays)
   }
   // Played ones are kept by the service, so they outlive the feed. The rest is
   // ordered as the settings say: started episodes on top, then by show or date.
-  readonly property var listed: root.showPlayed ? root.podcasts.playedEpisodes
+  readonly property var queueEpisodes: root.showPlayed ? [] : root.podcasts.queue
+  // What is listed under the queue: the played ones, or the unplayed ones that
+  // are not queued (a queued episode is only shown in the queue).
+  readonly property var mainEpisodes: root.showPlayed ? root.podcasts.playedEpisodes
     : Model.sortEpisodes(root.episodes.filter(function(e) {
       if (root.nowPlaying !== null && root.playerState !== "ended" && root.podcasts.sameEpisode(root.nowPlaying, e)) return false
+      if (root.isQueued(e)) return false
       var pos = root.positionOf(e)
       if (pos ? pos.completed === true : root.podcasts.playedSet[e.id] === true) return root.finishedRecently(e)
       return true
     }), root.podcasts.positions, { inProgressFirst: root.inProgressFirst, groupByFeed: root.groupByFeed,
       currentId: root.nowPlaying ? root.nowPlaying.id : "" })
 
-  // The list shows one page at a time; reaching its end (arrow keys or a click
-  // on the arrow below it) reveals the next page. A page is 20 episodes, or 15
-  // while one is playing (the now-playing card takes room).
-  readonly property int pageSize: root.nowPlaying !== null ? 10 : 15
-  property int visibleCount: root.pageSize
-  readonly property var shown: root.listed.slice(0, root.visibleCount)
-  readonly property bool hasMore: root.listed.length > root.visibleCount
-  function showMore() {
-    if (root.hasMore) root.visibleCount = Math.min(root.listed.length, root.visibleCount + root.pageSize)
-  }
-
   // Whether any listed episode was started and left, which the header mentions.
-  readonly property bool hasInProgress: root.listed.some(function(e) {
+  readonly property bool hasInProgress: root.mainEpisodes.some(function(e) {
     return Model.inProgress(root.podcasts.positions[e.id], e.durationMs)
   })
+
+  function sectionHeader(key, title, count) {
+    return { isHeader: true, section: key, title: title, count: count,
+             id: "", show: "", published: "", durationMs: 0, artwork: "", artworkLarge: "", url: "" }
+  }
+
+  // The rows of the list, in order: each section's title (a row of its own, so
+  // it can be selected and folded) followed by its episodes unless folded.
+  readonly property var listed: {
+    var out = []
+    if (root.queueEpisodes.length > 0) {
+      out.push(root.sectionHeader("queue", "QUEUE", root.queueEpisodes.length))
+      if (!root.isCollapsed("queue")) out = out.concat(root.queueEpisodes)
+    }
+    if (root.mainEpisodes.length > 0) {
+      var title = root.showPlayed ? "PLAYED" : root.hasInProgress ? "UNPLAYED & IN PROGRESS" : "UNPLAYED"
+      out.push(root.sectionHeader("main", title, root.mainEpisodes.length))
+      if (!root.isCollapsed("main")) out = out.concat(root.mainEpisodes.slice(0, root.visibleCount))
+    }
+    return out
+  }
+
+  // The unplayed list shows one page at a time; reaching its end (arrow keys or
+  // a click on the arrow below it) reveals the next page. A page is 15
+  // episodes, or 10 while one is playing (the now-playing card takes room).
+  readonly property int pageSize: root.nowPlaying !== null ? 10 : 15
+  property int visibleCount: root.pageSize
+  readonly property var shown: root.listed
+  readonly property bool hasMore: !root.isCollapsed("main") && root.mainEpisodes.length > root.visibleCount
+  function showMore() {
+    if (root.hasMore) root.visibleCount = Math.min(root.mainEpisodes.length, root.visibleCount + root.pageSize)
+  }
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   // Secondary text (author, date, duration). Themes' muted colour is often too
@@ -217,6 +256,7 @@ Panel {
     readonly property var positions: ({})
     readonly property var playedEpisodes: []
     readonly property var playedSet: ({})
+    readonly property var queue: []
     readonly property var nowPlaying: null
     readonly property string playerState: "idle"
     readonly property real position: 0
@@ -265,17 +305,18 @@ Panel {
 
   function moveSelection(dy) {
     if (root.listed.length === 0) return
-    if (dy > 0 && root.selected >= root.visibleCount - 1) root.showMore()
-    root.selected = Math.max(0, Math.min(Math.min(root.listed.length, root.visibleCount) - 1, root.selected + dy))
+    if (dy > 0 && root.selected >= root.listed.length - 1) root.showMore()
+    root.selected = Math.max(0, Math.min(root.listed.length - 1, root.selected + dy))
   }
 
   function openEpisode(index) {
     var e = root.listed[index]
     if (!e) return
+    if (e.isHeader === true) { root.toggleSection(e.section); return }
     root.podcasts.play(e)
   }
 
-  onListedChanged: root.selected = Math.max(0, Math.min(root.shown.length - 1, root.selected))
+  onListedChanged: root.selected = Math.max(0, Math.min(root.listed.length - 1, root.selected))
   onPageSizeChanged: root.visibleCount = root.pageSize
   onShowPlayedChanged: root.visibleCount = root.pageSize
 
@@ -364,7 +405,15 @@ Panel {
         else if (text === "p" && !root.showAccount && !root.showSettings) { root.showPlayed = !root.showPlayed; root.selected = 0 }
         else if (text === "m" && !root.showAccount && !root.showSettings && !root.showPlayed) {
           var ep = root.listed[root.selected]
-          if (ep) root.podcasts.markPlayed(ep)
+          if (ep && ep.isHeader !== true) root.podcasts.markPlayed(ep)
+        }
+        else if (text === "n" && !root.showAccount && !root.showSettings) {
+          var qe = root.listed[root.selected]
+          if (qe && qe.isHeader !== true && !root.showPlayed) root.podcasts.enqueue(qe)
+        }
+        else if (text === "R" && !root.showAccount && !root.showSettings) {
+          var re = root.listed[root.selected]
+          if (re && re.isHeader !== true && root.isQueued(re)) root.podcasts.dequeue(re)
         }
         else if (text === "c") root.accountOpen = !root.accountOpen
         else if (text === ",") root.settingsOpen = !root.settingsOpen
@@ -977,15 +1026,6 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.showPlayed ? "PLAYED" : root.hasInProgress ? "UNPLAYED & IN PROGRESS" : "UNPLAYED"
-            color: root.accent
-            font.family: root.fontFamily
-            font.pixelSize: root.fs(Style.font.bodySmall)
-            font.bold: true
-          }
-
-          Text {
-            width: parent.width
             visible: root.playError !== ""
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
@@ -1075,7 +1115,8 @@ Panel {
                   required property int index
                   required property var modelData
                   width: parent.width
-                  height: rowText.implicitHeight + Style.space(12)
+                  readonly property bool isHeader: row.modelData.isHeader === true
+                  height: row.isHeader ? sectionTitle.implicitHeight + Style.space(10) : rowText.implicitHeight + Style.space(12)
                   radius: Style.space(6)
                   color: row.index === root.selected ? Qt.alpha(root.accent, 0.18) : "transparent"
                   opacity: 0
@@ -1085,8 +1126,24 @@ Panel {
                   // Episodes of one show share the same artwork URL, and Image's pixmap
                   // cache keeps the decoded bitmap in memory, so each icon is fetched
                   // once however many rows use it.
+                  // A section's title: folds or unfolds the section.
+                  Text {
+                    id: sectionTitle
+                    visible: row.isHeader
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(8)
+                    text: (root.isCollapsed(row.modelData.section) ? "\u25B8  " : "\u25BE  ") + row.modelData.title
+                      + (root.isCollapsed(row.modelData.section) ? "  \u00B7  " + row.modelData.count : "")
+                    color: root.accent
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fs(Style.font.bodySmall)
+                    font.bold: true
+                  }
+
                   ArtImage {
                     id: rowIcon
+                    visible: !row.isHeader && url !== ""
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: Style.space(8)
@@ -1098,6 +1155,7 @@ Panel {
 
                   Column {
                     id: rowText
+                    visible: !row.isHeader
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: rowIcon.right
                     anchors.right: parent.right
@@ -1159,7 +1217,7 @@ Panel {
                       anchors.left: titleBox.right
                       anchors.leftMargin: Style.space(6)
                       anchors.verticalCenter: titleBox.verticalCenter
-                      visible: !root.showPlayed && root.finishedRecently(row.modelData)
+                      visible: !row.isHeader && !root.showPlayed && root.finishedRecently(row.modelData)
                       text: "\u2713"
                       color: "#2ea043"
                       font.family: root.fontFamily
@@ -1205,7 +1263,7 @@ Panel {
                   Rectangle {
                     id: rowPlay
                     anchors.fill: rowIcon
-                    visible: rowIconHover.containsMouse
+                    visible: !row.isHeader && rowIconHover.containsMouse
                     radius: Style.space(4)
                     color: Qt.rgba(0, 0, 0, 0.55)
                     Text {
@@ -1219,6 +1277,7 @@ Panel {
                   MouseArea {
                     id: rowIconHover
                     anchors.fill: rowIcon
+                    enabled: !row.isHeader
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onEntered: root.selected = row.index

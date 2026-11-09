@@ -182,6 +182,7 @@ Item {
     root.pushedKey = ""
     root.pendingPush = []
     root.localQueue = []
+    root.queue = []
     root.errorText = ""
   }
 
@@ -253,6 +254,46 @@ Item {
   readonly property int pushEveryMs: 15000
 
   function sameEpisode(a, b) { return a && b && a.id !== "" && a.id === b.id }
+
+  // Episodes lined up to start by themselves, in order, once the one playing
+  // has ended. Saved to queue.json so it survives a shell restart.
+  property var queue: []
+  property bool queueDirty: false
+
+  // Kept in queue.json so the queue survives a shell restart.
+  onQueueChanged: root.saveQueue()
+
+  function saveQueue() {
+    if (queueSaveProcess.running) { root.queueDirty = true; return }
+    queueSaveProcess.payload = JSON.stringify(root.queue)
+    queueSaveProcess.command = ["/usr/bin/bash", root.api, "saveplayed", "queue"]
+    queueSaveProcess.stdinEnabled = true
+    queueSaveProcess.running = true
+  }
+
+  // Adds an episode to the end of the queue. With nothing playing there is
+  // nothing to wait for, so it starts right away.
+  function enqueue(episode) {
+    if (!episode) return
+    if (!root.playbackActive || root.playerState === "ended") { root.queue = root.queue.filter(function(q) { return !root.sameEpisode(q, episode) }); root.play(episode); return }
+    if (root.sameEpisode(root.nowPlaying, episode)) return
+    if (root.queue.some(function(q) { return root.sameEpisode(q, episode) })) return
+    root.queue = root.queue.concat([episode])
+  }
+
+  // Takes an episode out of the queue.
+  function dequeue(episode) {
+    if (!episode) return
+    root.queue = root.queue.filter(function(q) { return !root.sameEpisode(q, episode) })
+  }
+
+  function playNext() {
+    while (root.queue.length > 0) {
+      var next = root.queue[0]
+      root.queue = root.queue.slice(1)
+      if (Model.httpUrl(next.assetUrl)) { root.nowPlaying = null; root.play(next); return }
+    }
+  }
 
   function play(episode) {
     if (!episode) return
@@ -402,6 +443,7 @@ Item {
     if (root.playbackActive) root.pushPosition()
     root.starting = false
     root.controlQueue = []
+    root.queue = []
     controlProcess.command = ["/usr/bin/bash", root.player, "stop"]
     controlProcess.running = true
     root.nowPlaying = null
@@ -431,7 +473,10 @@ Item {
 
   // On load, also look for audio still running from before a shell reload:
   // mpv is detached, so it outlives us.
-  Component.onCompleted: { root.checkConfig(); root.loadSpeed(); root.pollPlayer() }
+  Component.onCompleted: {
+    queueGetProcess.command = ["/usr/bin/bash", root.api, "getplayed", "queue"]
+    queueGetProcess.running = true
+    root.checkConfig(); root.loadSpeed(); root.pollPlayer() }
 
   function loadSpeed() {
     speedProcess.command = ["/usr/bin/bash", root.player, "getspeed"]
@@ -527,6 +572,7 @@ Item {
         if (root.nowPlaying && root.playerState !== "idle" && root.playerState !== "buffering") {
           root.playerState = "ended"
           root.pushPosition()
+          root.playNext()
         }
         return
       }
@@ -610,6 +656,39 @@ Item {
       if (ep.id === "") return
       root.keptNowPlaying = ep
       root.restoreNowPlaying()
+    }
+  }
+
+  Process {
+    id: queueGetProcess
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdout: StdioCollector { id: queueGetOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var kept = []
+      try { kept = JSON.parse(queueGetOut.text) } catch (e) { kept = [] }
+      if (!Array.isArray(kept)) return
+      var have = root.queue
+      var extra = kept.map(Model.sanitizeEpisode).filter(function(e) {
+        return e.id !== "" && !have.some(function(q) { return q.id === e.id })
+      })
+      if (extra.length > 0) root.queue = extra.concat(have)
+    }
+  }
+
+  Process {
+    id: queueSaveProcess
+    property string payload: ""
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdinEnabled: true
+    onStarted: { write(payload); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      if (root.queueDirty) { root.queueDirty = false; Qt.callLater(root.saveQueue) }
     }
   }
 
