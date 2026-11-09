@@ -155,7 +155,30 @@ Panel {
   })
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color dim: Color.muted
+  // Secondary text (author, date, duration). Themes' muted colour is often too
+  // faint on the panel background, so it is pulled toward the foreground until
+  // it reaches a WCAG-style contrast ratio, while keeping the theme's hue.
+  readonly property color panelBackground: Color.popups.background
+  readonly property color dim: root.readable(Color.muted, root.foreground, root.panelBackground, 5.5)
+
+  function luminance(c) {
+    function ch(v) { return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
+    return 0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b)
+  }
+  function contrast(a, b) {
+    var la = root.luminance(a), lb = root.luminance(b)
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+  }
+  function readable(base, target, bg, minRatio) {
+    for (var i = 0; i <= 10; i++) {
+      var t = i / 10
+      var c = Qt.rgba(base.r + (target.r - base.r) * t,
+                      base.g + (target.g - base.g) * t,
+                      base.b + (target.b - base.b) * t, 1)
+      if (root.contrast(c, bg) >= minRatio) return c
+    }
+    return target
+  }
   readonly property color accent: Color.accent
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   // Text size is offered as named sizes; every font size in the panel is
