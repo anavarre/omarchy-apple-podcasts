@@ -101,7 +101,8 @@ run art "http://127.0.0.1:$port/art/text.png" > /dev/null 2>&1; check "art non-i
 run art "http://127.0.0.1:$port/art/big.png" > /dev/null 2>&1; check "art oversized refused (20)" $? 20
 run art "http://127.0.0.1:$port/art/redir.png" > /dev/null 2>&1; check "art redirect not followed (20)" $? 20
 run art "file:///etc/passwd" > /dev/null 2>&1; check "art non-http refused (64)" $? 64
-check "art leaves no temp files" "$(ls -A "$tmp/store/art" | grep -c '^\.tmp')" 0
+tmpleft=0; for f in "$tmp"/store/art/.tmp*; do [ -e "$f" ] && tmpleft=$((tmpleft + 1)); done
+check "art leaves no temp files" "$tmpleft" 0
 
 run forget; check "forget empties store" "$(ls -A "$tmp/store" | wc -l)" 0
 mkdir "$tmp/real"; ln -s "$tmp/real" "$tmp/link"
