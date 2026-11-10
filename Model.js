@@ -44,6 +44,18 @@ var environment = {
   CURL_CA_BUNDLE: null
 }
 
+// The same, for bin/podcasts-paste: wl-paste finds the compositor through
+// WAYLAND_DISPLAY (a name relative to XDG_RUNTIME_DIR, or an absolute path), so
+// the shell's choice is kept, as it may not be the default "wayland-0".
+// WAYLAND_SOCKET is deliberately not passed on: it names a file descriptor the
+// shell's own connection consumed, which a child could not use.
+var pasteEnvironment = (function() {
+  var e = {}
+  for (var k in environment) e[k] = environment[k]
+  e.WAYLAND_DISPLAY = null
+  return e
+})()
+
 function localPath(url) {
   var s = String(url || "")
   if (s.indexOf("file://") !== 0) return ""

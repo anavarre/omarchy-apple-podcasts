@@ -269,6 +269,46 @@ cmd_getposall() {
 # Artwork is fetched here, not by the UI's image loader, so it gets the same
 # bounds as every other request: 1 MiB, 10 s, no redirect followed. Only a file
 # that starts like an image is kept. Prints the cached path.
+#
+# Before the GUI decoder ever sees a file, its declared size is read from the
+# header (a few bytes, no decoding) and held to a budget: a small file can
+# still claim to be a billion pixels. Sets W and H; fails if they can't be read.
+artMaxSide=4096
+artMaxPixels=16000000
+imageDims() {
+  local -a b
+  local i=2 m len
+  read -r -a b <<< "$(head -c 65536 "$1" | od -An -v -tu1 | tr -s ' \n' ' ')"
+  W=0 H=0
+  case "${b[0]:-}" in
+    137) # PNG: IHDR width and height, big-endian
+      W=$(( b[16]<<24 | b[17]<<16 | b[18]<<8 | b[19] )); H=$(( b[20]<<24 | b[21]<<16 | b[22]<<8 | b[23] )) ;;
+    71) # GIF: logical screen, little-endian
+      W=$(( b[6] | b[7]<<8 )); H=$(( b[8] | b[9]<<8 )) ;;
+    82) # WebP: lossy (VP8 ), lossless (VP8L) or extended (VP8X)
+      case "${b[12]}.${b[13]}.${b[14]}.${b[15]}" in
+        86.80.56.32) W=$(( (b[26] | b[27]<<8) & 16383 )); H=$(( (b[28] | b[29]<<8) & 16383 )) ;;
+        86.80.56.76) W=$(( ((b[21] | b[22]<<8 | b[23]<<16 | b[24]<<24) & 16383) + 1 )); H=$(( (((b[21] | b[22]<<8 | b[23]<<16 | b[24]<<24) >> 14) & 16383) + 1 )) ;;
+        86.80.56.88) W=$(( (b[24] | b[25]<<8 | b[26]<<16) + 1 )); H=$(( (b[27] | b[28]<<8 | b[29]<<16) + 1 )) ;;
+      esac ;;
+    255) # JPEG: walk the markers up to the first frame header
+      local n=0
+      while [ "$n" -lt 400 ] && [ -n "${b[i+3]:-}" ]; do
+        n=$((n + 1))
+        [ "${b[i]}" = 255 ] || return 1
+        m=${b[i+1]}
+        if [ "$m" = 255 ]; then i=$((i + 1)); continue; fi
+        if [ "$m" = 1 ] || { [ "$m" -ge 208 ] && [ "$m" -le 215 ]; }; then i=$((i + 2)); continue; fi
+        if [ "$m" -ge 192 ] && [ "$m" -le 207 ] && [ "$m" != 196 ] && [ "$m" != 200 ] && [ "$m" != 204 ]; then
+          H=$(( b[i+5]<<8 | b[i+6] )); W=$(( b[i+7]<<8 | b[i+8] )); break
+        fi
+        len=$(( b[i+2]<<8 | b[i+3] ))
+        i=$((i + 2 + len))
+      done ;;
+  esac
+  [ "$W" -gt 0 ] && [ "$H" -gt 0 ]
+}
+
 cmd_art() {
   local url="${1:-}" dir="$store/art" name f t magic
   case "$url" in http://*|https://*) ;; *) usage 'art: URL must be http:// or https://' ;; esac
@@ -287,6 +327,9 @@ cmd_art() {
     ffd8ff*|89504e470d0a1a0a*|47494638*|52494646????????57454250) ;;
     *) rm -f "$t"; printf 'Not an image.\n' >&2; exit 20 ;;
   esac
+  if ! imageDims "$t" || [ "$W" -gt "$artMaxSide" ] || [ "$H" -gt "$artMaxSide" ] || [ $((W * H)) -gt "$artMaxPixels" ]; then
+    rm -f "$t"; printf 'Image dimensions unreadable or over budget.\n' >&2; exit 20
+  fi
   chmod 600 "$t" && mv -f "$t" "$f" || { rm -f "$t"; exit 24; }
   # Keep the newest 100 images, not an ever-growing pile.
   ls -t "$dir" | tail -n +101 | while IFS= read -r old; do rm -f "$dir/$old"; done

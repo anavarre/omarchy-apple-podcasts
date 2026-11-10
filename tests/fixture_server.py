@@ -31,6 +31,11 @@ EPISODES = {"data": [
 POSITIONS = {"1001": {"completed": False, "positionInMilliseconds": 600000, "recordedAtTimestamp": "2026-10-28T08:00:00.000Z"}}
 POS_PATH = "/v1/me/playback/positions/podcast-episodes"
 
+def png(w, h):
+    import struct
+    return b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", w, h) + b"\x08\x06\x00\x00\x00" + b"0" * 4
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def send(self, code, body, ctype="application/json"):
@@ -61,7 +66,9 @@ class H(BaseHTTPRequestHandler):
         self.send(204, "")
     def do_GET(self):
         path = urlparse(self.path).path
-        if path == "/art/ok.png": return self.send(200, b"\x89PNG\r\n\x1a\n" + b"0" * 64, "image/png")
+        if path == "/art/ok.png": return self.send(200, png(1, 1), "image/png")
+        if path == "/art/huge.png": return self.send(200, png(20000, 20000), "image/png")
+        if path == "/art/noheader.png": return self.send(200, b"\x89PNG\r\n\x1a\n" + b"0" * 64, "image/png")
         if path == "/art/text.png": return self.send(200, "<html>not an image</html>", "image/png")
         if path == "/art/big.png": return self.send(200, b"\x89PNG\r\n\x1a\n" + b"0" * 2000000, "image/png")
         if path == "/art/redir.png":

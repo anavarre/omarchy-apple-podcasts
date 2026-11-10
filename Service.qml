@@ -16,34 +16,75 @@ Item {
 
   // A finite helper run. Beyond Process: start() stamps the session it began
   // under (stale: the account changed since, so its result must be dropped) and
-  // arms a deadline. At the deadline a still-running child is killed; one that
-  // never reported a start (FailedToStart) gets a synthetic exit, so each
-  // handler's normal failure path restores its flags and drains its queue.
+  // arms a deadline. A helper still running at the deadline is stopped in
+  // bounded steps: terminate, then SIGKILL to it and its whole process group
+  // (it runs under setsid, so curl, mpv and the like go with it), then, if even
+  // that is not acknowledged, the run is declared over. One that never reported
+  // a start (FailedToStart) gets a synthetic exit. Either way each handler's
+  // normal failure path runs, restoring its flags and draining its queue.
+  //
+  // One child at a time: start() while a run is still winding down queues the
+  // new launch, which happens only after the old child's exit was delivered, with
+  // a fresh deadline and a fresh session stamp. cancel() winds a run down and
+  // drops any queued launch.
   component Op: Process {
     id: op
     property int born: -1
     property int deadlineMs: 120000
+    property int graceMs: 2000
     property bool armed: false
+    property bool queued: false
+    // 0: running normally, 1: terminate sent, 2: killed
+    property int phase: 0
     readonly property bool stale: op.born !== root.session
     function start() {
+      if (op.armed) { op.queued = true; op.wind(); return }
+      op.launch()
+    }
+    function launch() {
+      op.queued = false
       op.born = root.session
       op.armed = true
+      op.phase = 0
+      var c = op.command
+      if (c.length > 0 && c[0] !== "/usr/bin/setsid") op.command = ["/usr/bin/setsid", "-w"].concat(c)
       op.watchdog.interval = op.deadlineMs
       op.watchdog.restart()
       op.running = true
     }
+    function cancel() {
+      op.queued = false
+      if (op.armed) op.wind()
+    }
+    // Moves a live run one step toward being gone and re-arms the timer for the next.
+    function wind() {
+      if (!op.armed) return
+      if (!op.running) { op.finish(); return }
+      if (op.phase === 0) { op.phase = 1; op.running = false }
+      else if (op.phase === 1) {
+        op.phase = 2
+        if (op.processId > 0) Quickshell.execDetached(["/usr/bin/kill", "-KILL", "--", "-" + op.processId])
+        op.signal(9)
+      } else { op.finish(); return }
+      op.watchdog.interval = op.graceMs
+      op.watchdog.restart()
+    }
+    // Gives up on a child that can't be reaped: the run is over for the caller.
+    function finish() {
+      op.watchdog.stop()
+      op.exited(-1, 0)
+    }
     Component.onCompleted: op.exited.connect(function() {
+      var wasArmed = op.armed
       op.armed = false
       op.watchdog.stop()
       Qt.callLater(root.maybeForget)
+      // Not before the handlers have run, and only for the child that exited.
+      if (wasArmed) Qt.callLater(function() { if (op.queued && !op.armed) op.launch() })
     })
     property Timer watchdog: Timer {
       repeat: false
-      onTriggered: {
-        if (!op.armed) return
-        if (op.running) op.running = false
-        else { op.armed = false; op.exited(-1, 0) }
-      }
+      onTriggered: op.wind()
     }
   }
 
@@ -133,7 +174,6 @@ Item {
     if (!root.hasToken || !e || e.id === "") return
     nowSaveProcess.payload = JSON.stringify(e)
     if (root.forgetting) return
-    nowSaveProcess.running = false
     nowSaveProcess.stdinEnabled = true
     nowSaveProcess.command = ["/usr/bin/bash", root.api, "saveplayed", "now"]
     nowSaveProcess.start()
@@ -182,6 +222,19 @@ Item {
   property var artQueue: []
   property var artFailed: ({})
   readonly property int artQueueMax: 40
+  // Matches the 100 images bin/podcasts-api keeps on disk: a path that fell out
+  // of that cache is forgotten here too, and fetched again if it is shown again.
+  readonly property int artKeep: 100
+
+  // A copy of the map plus one entry, oldest entries dropped past max.
+  function withArt(map, key, value, max) {
+    var next = Object.assign({}, map)
+    delete next[key]
+    next[key] = value
+    var keys = Object.keys(next)
+    for (var i = 0; i < keys.length - max; i++) delete next[keys[i]]
+    return next
+  }
 
   function requestArt(url) {
     var u = Model.httpUrl(url)
@@ -264,14 +317,14 @@ Item {
     root.errorText = ""
     var cancel = [saveProcess, nowSaveProcess, queueSaveProcess, playedSaveProcess, localSaveProcess, putProcess,
       episodesProcess, positionsProcess, localLoadProcess, playedGetProcess, nowGetProcess, configProcess, artProcess]
-    for (var i = 0; i < cancel.length; i++) if (cancel[i].running) cancel[i].running = false
+    for (var i = 0; i < cancel.length; i++) cancel[i].cancel()
     root.maybeForget()
   }
 
   function maybeForget() {
     if (!root.forgetting || forgetProcess.armed) return
     var writers = [saveProcess, nowSaveProcess, queueSaveProcess, playedSaveProcess, localSaveProcess, putProcess, artProcess]
-    for (var i = 0; i < writers.length; i++) if (writers[i].running) return
+    for (var i = 0; i < writers.length; i++) if (writers[i].armed) return
     forgetProcess.command = ["/usr/bin/bash", root.api, "forget"]
     forgetProcess.start()
   }
@@ -861,13 +914,9 @@ Item {
       var path = Model.text(artOut.text).trim()
       if (!artProcess.stale) {
         if (exitCode === 0 && /^\/[A-Za-z0-9\/._-]+$/.test(path)) {
-          var next = Object.assign({}, root.artPaths)
-          next[artProcess.url] = "file://" + path
-          root.artPaths = next
+          root.artPaths = root.withArt(root.artPaths, artProcess.url, "file://" + path, root.artKeep)
         } else {
-          var failed = Object.assign({}, root.artFailed)
-          failed[artProcess.url] = true
-          root.artFailed = failed
+          root.artFailed = root.withArt(root.artFailed, artProcess.url, true, root.artKeep)
         }
       }
       Qt.callLater(root.nextArt)

@@ -99,6 +99,8 @@ check "art prints a cached file" "$([ -f "$art" ] && echo yes)" yes
 check "art file mode 600" "$(stat -c %a "$art")" 600
 run art "http://127.0.0.1:$port/art/text.png" > /dev/null 2>&1; check "art non-image refused (20)" $? 20
 run art "http://127.0.0.1:$port/art/big.png" > /dev/null 2>&1; check "art oversized refused (20)" $? 20
+run art "http://127.0.0.1:$port/art/huge.png" > /dev/null 2>&1; check "art over pixel budget refused (20)" $? 20
+run art "http://127.0.0.1:$port/art/noheader.png" > /dev/null 2>&1; check "art with unreadable size refused (20)" $? 20
 run art "http://127.0.0.1:$port/art/redir.png" > /dev/null 2>&1; check "art redirect not followed (20)" $? 20
 run art "file:///etc/passwd" > /dev/null 2>&1; check "art non-http refused (64)" $? 64
 tmpleft=0; for f in "$tmp"/store/art/.tmp*; do [ -e "$f" ] && tmpleft=$((tmpleft + 1)); done

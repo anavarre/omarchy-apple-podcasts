@@ -234,3 +234,10 @@ test("retained data is bounded", () => {
   assert.strictEqual(Object.keys(kept).length, M.maxPositions);
   assert.ok(kept["700"] && !kept["1"]);
 });
+
+test('pasteEnvironment keeps the Wayland display selection and nothing else extra', () => {
+  assert.strictEqual(M.pasteEnvironment.WAYLAND_DISPLAY, null)
+  assert.ok(!('WAYLAND_SOCKET' in M.pasteEnvironment))
+  assert.ok(!('WAYLAND_DISPLAY' in M.environment))
+  for (const k in M.environment) assert.strictEqual(M.pasteEnvironment[k], M.environment[k])
+})

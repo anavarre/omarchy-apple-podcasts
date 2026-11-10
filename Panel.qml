@@ -264,6 +264,7 @@ Panel {
     readonly property var playedEpisodes: []
     readonly property var playedSet: ({})
     readonly property var queue: []
+    readonly property int session: 0
     readonly property var artPaths: ({})
     function requestArt(url) {}
     readonly property var nowPlaying: null
@@ -364,19 +365,39 @@ Panel {
   // never through Qt's own clipboard path, which reads without bounds.
   readonly property int maxTokenLength: 2048
   function pasteToken(primary) {
-    if (pasteProcess.running) return
+    if (pasteProcess.armed) return
+    pasteProcess.born = root.pasteEpoch
     pasteProcess.command = ["/usr/bin/bash", Model.localPath(Qt.resolvedUrl("bin/podcasts-paste"))].concat(primary ? ["primary"] : [])
+    pasteProcess.armed = true
     pasteProcess.running = true
   }
 
+  // Bumped whenever a paste in flight stops being wanted (the form or panel
+  // went away, or the account changed), so a late answer is dropped and a
+  // cancelled sign-in is never repopulated.
+  property int pasteEpoch: 0
+  readonly property bool pasteWanted: root.opened && root.showSignIn
+  readonly property int accountSession: root.podcasts.session
+  function cancelPaste() {
+    root.pasteEpoch++
+    if (pasteProcess.armed) pasteProcess.running = false
+  }
+  onPasteWantedChanged: root.cancelPaste()
+  onAccountSessionChanged: root.cancelPaste()
+
   Process {
     id: pasteProcess
+    property bool armed: false
+    property int born: 0
     running: false
     command: []
     clearEnvironment: true
-    environment: Model.environment
+    environment: Model.pasteEnvironment
     stdout: StdioCollector { id: pasteOut; waitForEnd: true }
+    onRunningChanged: if (running) pasteProcess.armed = true
     onExited: function(exitCode) {
+      pasteProcess.armed = false
+      if (pasteProcess.born !== root.pasteEpoch || !root.pasteWanted) return
       var t = pasteOut.text.replace(/[\r\n]/g, "").trim()
       if (exitCode !== 0 || t === "" || t.length > root.maxTokenLength || !/^[\x21-\x7e]+$/.test(t)) {
         root.pasteError = exitCode === 2 || t.length > root.maxTokenLength
