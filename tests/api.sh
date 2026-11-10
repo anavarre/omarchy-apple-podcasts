@@ -93,6 +93,16 @@ printf '[{"id":"1001"}]' | run saveplayed; check "saveplayed exit 0" $? 0
 check "getplayed reads it back" "$(run getplayed)" '[{"id":"1001"}]'
 check "played file mode 600" "$(stat -c %a "$tmp/store/played.json")" 600
 
+# Artwork: a small image only, fetched without following redirects.
+art=$(run art "http://127.0.0.1:$port/art/ok.png"); check "art exit 0" $? 0
+check "art prints a cached file" "$([ -f "$art" ] && echo yes)" yes
+check "art file mode 600" "$(stat -c %a "$art")" 600
+run art "http://127.0.0.1:$port/art/text.png" > /dev/null 2>&1; check "art non-image refused (20)" $? 20
+run art "http://127.0.0.1:$port/art/big.png" > /dev/null 2>&1; check "art oversized refused (20)" $? 20
+run art "http://127.0.0.1:$port/art/redir.png" > /dev/null 2>&1; check "art redirect not followed (20)" $? 20
+run art "file:///etc/passwd" > /dev/null 2>&1; check "art non-http refused (64)" $? 64
+check "art leaves no temp files" "$(ls -A "$tmp/store/art" | grep -c '^\.tmp')" 0
+
 run forget; check "forget empties store" "$(ls -A "$tmp/store" | wc -l)" 0
 mkdir "$tmp/real"; ln -s "$tmp/real" "$tmp/link"
 echo "$good" | PODCASTS_PLUGIN_DIR=$tmp/link run save > /dev/null 2>&1; check "symlinked store refused (24)" $? 24

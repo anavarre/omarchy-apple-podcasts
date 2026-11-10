@@ -11,19 +11,26 @@ Panel {
   moduleName: "anavarre.apple-podcasts"
   manageIpc: false
 
-  // Artwork that tries again when a load fails (a dropped connection, a CDN
-  // hiccup) instead of leaving its slot blank until the panel is rebuilt.
+  // Artwork. The image is never fetched by Image itself: the service downloads
+  // it through bin/podcasts-api (size, time and redirect bounds, image types
+  // only) and this loads the cached local file, decoded no larger than
+  // sourceSize. A decode failure is retried, as the file may have been replaced.
   component ArtImage: Image {
     id: art
     property string url: ""
+    property var service: null
     property int attempts: 0
     property bool blank: false
-    source: art.blank ? "" : art.url
+    readonly property string local: art.service && art.url !== "" ? (art.service.artPaths[art.url] || "") : ""
+    source: art.blank ? "" : art.local
     visible: art.url !== ""
+    sourceSize: Qt.size(512, 512)
     fillMode: Image.PreserveAspectCrop
     cache: true
     asynchronous: true
-    onUrlChanged: art.attempts = 0
+    onUrlChanged: { art.attempts = 0; art.want() }
+    Component.onCompleted: art.want()
+    function want() { if (art.service && art.url !== "") art.service.requestArt(art.url) }
     onStatusChanged: if (art.status === Image.Error && art.attempts < 4) retryTimer.restart()
     Timer {
       id: retryTimer
@@ -133,9 +140,6 @@ Panel {
   }
   // Where an episode was left; every read of a position in the list goes here.
   function positionOf(e) {
-    // TEMP-TEST: pretend the Moicano Nolan fight finished 12 hours ago.
-    if (e && String(e.title).indexOf("Moicano") >= 0 && String(e.title).indexOf("Nolan") >= 0)
-      return { ms: 0, completed: true, at: root.now - 0.5 * 86400000 }
     return root.podcasts.positions[e.id]
   }
   function isQueued(e) {
@@ -260,6 +264,8 @@ Panel {
     readonly property var playedEpisodes: []
     readonly property var playedSet: ({})
     readonly property var queue: []
+    readonly property var artPaths: ({})
+    function requestArt(url) {}
     readonly property var nowPlaying: null
     readonly property string playerState: "idle"
     readonly property real position: 0
@@ -901,7 +907,9 @@ Panel {
               anchors.horizontalCenter: parent.horizontalCenter
               width: visible ? Style.space(160) : 0
               height: width
+              service: root.podcasts
               url: root.nowPlaying ? (root.nowPlaying.artworkLarge || root.nowPlaying.artwork) : ""
+              sourceSize: Qt.size(Style.space(320), Style.space(320))
             }
 
             Column {
@@ -1208,6 +1216,7 @@ Panel {
                     anchors.leftMargin: Style.space(8)
                     width: visible ? Style.space(32) : 0
                     height: width
+                    service: root.podcasts
                     url: row.modelData.artwork || row.modelData.artworkLarge
                     sourceSize: Qt.size(Style.space(64), Style.space(64))
                   }

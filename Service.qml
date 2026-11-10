@@ -14,6 +14,39 @@ Item {
   property var shell: null
   property var manifest: null
 
+  // A finite helper run. Beyond Process: start() stamps the session it began
+  // under (stale: the account changed since, so its result must be dropped) and
+  // arms a deadline. At the deadline a still-running child is killed; one that
+  // never reported a start (FailedToStart) gets a synthetic exit, so each
+  // handler's normal failure path restores its flags and drains its queue.
+  component Op: Process {
+    id: op
+    property int born: -1
+    property int deadlineMs: 120000
+    property bool armed: false
+    readonly property bool stale: op.born !== root.session
+    function start() {
+      op.born = root.session
+      op.armed = true
+      op.watchdog.interval = op.deadlineMs
+      op.watchdog.restart()
+      op.running = true
+    }
+    Component.onCompleted: op.exited.connect(function() {
+      op.armed = false
+      op.watchdog.stop()
+      Qt.callLater(root.maybeForget)
+    })
+    property Timer watchdog: Timer {
+      repeat: false
+      onTriggered: {
+        if (!op.armed) return
+        if (op.running) op.running = false
+        else { op.armed = false; op.exited(-1, 0) }
+      }
+    }
+  }
+
   readonly property string api: Model.localPath(Qt.resolvedUrl("bin/podcasts-api"))
   readonly property string player: Model.localPath(Qt.resolvedUrl("bin/podcasts-player"))
 
@@ -99,10 +132,11 @@ Item {
     var e = root.nowPlaying
     if (!root.hasToken || !e || e.id === "") return
     nowSaveProcess.payload = JSON.stringify(e)
+    if (root.forgetting) return
     nowSaveProcess.running = false
     nowSaveProcess.stdinEnabled = true
     nowSaveProcess.command = ["/usr/bin/bash", root.api, "saveplayed", "now"]
-    nowSaveProcess.running = true
+    nowSaveProcess.start()
   }
 
   // Played: episodes Apple reports as completed (from the feed or the one
@@ -132,12 +166,39 @@ Item {
   }
 
   function savePlayed() {
-    if (!root.hasToken) return
+    if (!root.hasToken || root.forgetting) return
     if (playedSaveProcess.running) { root.playedDirty = true; return }
     playedSaveProcess.payload = JSON.stringify(root.playedEpisodes)
     playedSaveProcess.command = ["/usr/bin/bash", root.api, "saveplayed"]
     playedSaveProcess.stdinEnabled = true
-    playedSaveProcess.running = true
+    playedSaveProcess.start()
+  }
+
+  // ---------------------------------------------------------------- artwork
+  // Artwork is fetched one image at a time by `podcasts-api art` (bounded in
+  // bytes, time and redirects) and shown from its cached local file; the UI's
+  // image loader never touches the network. url -> file:// path.
+  property var artPaths: ({})
+  property var artQueue: []
+  property var artFailed: ({})
+  readonly property int artQueueMax: 40
+
+  function requestArt(url) {
+    var u = Model.httpUrl(url)
+    if (u === "" || root.artPaths[u] !== undefined || root.artFailed[u] === true) return
+    if (root.artQueue.indexOf(u) >= 0 || (artProcess.armed && artProcess.url === u)) return
+    if (root.artQueue.length >= root.artQueueMax) return
+    root.artQueue = root.artQueue.concat([u])
+    root.nextArt()
+  }
+
+  function nextArt() {
+    if (root.forgetting || artProcess.armed || root.artQueue.length === 0) return
+    var u = root.artQueue[0]
+    root.artQueue = root.artQueue.slice(1)
+    artProcess.url = u
+    artProcess.command = ["/usr/bin/bash", root.api, "art", u]
+    artProcess.start()
   }
 
   function refreshSoon() { if (authState === "ok") Qt.callLater(refresh) }
@@ -145,7 +206,7 @@ Item {
   function checkConfig() {
     if (configProcess.running) return
     configProcess.command = ["/usr/bin/bash", root.api, "config"]
-    configProcess.running = true
+    configProcess.start()
   }
 
   function refresh() {
@@ -155,43 +216,74 @@ Item {
     episodesProcess.session = root.session
     episodesProcess.command = ["/usr/bin/bash", root.api, "episodes",
       String(Model.episodeLimitMax), Model.knownSource(root.source)]
-    episodesProcess.running = true
+    episodesProcess.start()
   }
 
   // Stores the pasted media-user-token, then loads the list with it.
   function signIn(token) {
     if (saveProcess.running) return
+    if (root.forgetting) { root.signInError = "Still signing out; try again in a moment."; return }
     root.saving = true
     root.signInError = ""
     saveProcess.session = ++root.session
     saveProcess.payload = String(token || "").replace(/[\r\n]/g, "").trim() + "\n"
     saveProcess.command = ["/usr/bin/bash", root.api, "save"]
     saveProcess.stdinEnabled = true
-    saveProcess.running = true
+    saveProcess.start()
   }
+
+  // Forget, in a defined order: the session is bumped (so every result still in
+  // flight is stale), all work of the old session is cancelled, and only once
+  // no writer is left running does the script delete the store. Nothing queued
+  // under the old session survives, and nothing may start a write until the
+  // deletion has finished (forgetting).
+  property bool forgetting: false
 
   function forget() {
     root.session++
-    forgetProcess.command = ["/usr/bin/bash", root.api, "forget"]
-    forgetProcess.running = true
+    root.forgetting = true
     root.hasToken = false
     root.authState = "signedOut"
+    root.saving = false
+    root.loading = false
+    root.playedDirty = false
+    root.queueDirty = false
+    root.refreshQueued = false
+    root.pendingPush = []
+    root.localQueue = []
+    root.localKey = ""
     root.playedEpisodes = []
     root.episodes = []
     root.positions = ({})
     root.pushedKey = ""
-    root.pendingPush = []
-    root.localQueue = []
     root.queue = []
+    root.keptNowPlaying = null
+    root.artPaths = ({})
+    root.artQueue = []
+    root.artFailed = ({})
     root.errorText = ""
+    var cancel = [saveProcess, nowSaveProcess, queueSaveProcess, playedSaveProcess, localSaveProcess, putProcess,
+      episodesProcess, positionsProcess, localLoadProcess, playedGetProcess, nowGetProcess, configProcess, artProcess]
+    for (var i = 0; i < cancel.length; i++) if (cancel[i].running) cancel[i].running = false
+    root.maybeForget()
   }
+
+  function maybeForget() {
+    if (!root.forgetting || forgetProcess.armed) return
+    var writers = [saveProcess, nowSaveProcess, queueSaveProcess, playedSaveProcess, localSaveProcess, putProcess, artProcess]
+    for (var i = 0; i < writers.length; i++) if (writers[i].running) return
+    forgetProcess.command = ["/usr/bin/bash", root.api, "forget"]
+    forgetProcess.start()
+  }
+
+  function setPositions(next) { root.positions = Model.capPositions(next) }
 
   // Merges positions by whichever record is newer, so neither Apple's answer nor
   // this machine's file wipes out the other.
   function mergePositions(found) {
     var next = Object.assign({}, root.positions)
     for (var id in found) next[id] = Model.newerPosition(found[id], next[id] || null)
-    root.positions = next
+    root.setPositions(next)
   }
 
   function refreshPositions() {
@@ -202,12 +294,12 @@ Item {
     if (!localLoadProcess.running) {
       localLoadProcess.session = root.session
       localLoadProcess.command = ["/usr/bin/bash", root.api, "getposall", ids.join(",")]
-      localLoadProcess.running = true
+      localLoadProcess.start()
     }
     if (!root.hasToken || positionsProcess.running) return
     positionsProcess.session = root.session
     positionsProcess.command = ["/usr/bin/bash", root.api, "positions", ids.join(",")]
-    positionsProcess.running = true
+    positionsProcess.start()
   }
 
   // Only web URLs reach the browser: the feed must not be able to launch
@@ -264,11 +356,12 @@ Item {
   onQueueChanged: root.saveQueue()
 
   function saveQueue() {
+    if (root.forgetting) return
     if (queueSaveProcess.running) { root.queueDirty = true; return }
     queueSaveProcess.payload = JSON.stringify(root.queue)
     queueSaveProcess.command = ["/usr/bin/bash", root.api, "saveplayed", "queue"]
     queueSaveProcess.stdinEnabled = true
-    queueSaveProcess.running = true
+    queueSaveProcess.start()
   }
 
   // Adds an episode to the end of the queue. With nothing playing there is
@@ -335,7 +428,7 @@ Item {
     if (!/^[0-9]+$/.test(e.id)) { root.launch(e, 0); return }
     if (!root.hasToken) { root.resolveResume(e, null); return }
     resumeProcess.command = ["/usr/bin/bash", root.api, "positions", e.id]
-    resumeProcess.running = true
+    resumeProcess.start()
   }
 
   // Apple's answer and this machine's record, whichever is newer, then start.
@@ -343,13 +436,13 @@ Item {
     resumeProcess.apple = apple
     localGetProcess.episode = e
     localGetProcess.command = ["/usr/bin/bash", root.api, "getpos", e.id]
-    localGetProcess.running = true
+    localGetProcess.start()
   }
 
   function launch(episode, seconds) {
     root.position = seconds
     playProcess.command = ["/usr/bin/bash", root.player, "play", episode.assetUrl, episode.title, String(seconds)]
-    playProcess.running = true
+    playProcess.start()
   }
 
   // Tells Apple how far the current episode has got, so that the phone and any
@@ -368,7 +461,7 @@ Item {
     if (!root.hasToken) return
     // One slot per episode: switching episodes must not lose the old one's.
     root.pendingPush = root.pendingPush.filter(function(p) { return p.id !== e.id })
-      .concat([{ id: e.id, ms: ms, done: done, key: key }])
+      .concat([{ id: e.id, ms: ms, done: done, key: key }]).slice(-50)
     root.flushPush()
   }
 
@@ -381,7 +474,7 @@ Item {
     root.saveLocal(e.id, ms, true)
     if (!root.hasToken) return
     root.pendingPush = root.pendingPush.filter(function(p) { return p.id !== e.id })
-      .concat([{ id: e.id, ms: ms, done: true, key: e.id + ":" + ms + ":true" }])
+      .concat([{ id: e.id, ms: ms, done: true, key: e.id + ":" + ms + ":true" }]).slice(-50)
     root.flushPush()
   }
 
@@ -391,18 +484,18 @@ Item {
     root.localKey = key
     var next = Object.assign({}, root.positions)
     next[id] = { ms: ms, completed: done, at: Date.now() }
-    root.positions = next
+    root.setPositions(next)
     root.localQueue = root.localQueue.filter(function(q) { return q[0] !== id })
-      .concat([[id, String(ms), done ? "true" : "false"]])
+      .concat([[id, String(ms), done ? "true" : "false"]]).slice(-50)
     root.nextLocal()
   }
 
   function nextLocal() {
-    if (localSaveProcess.running || root.localQueue.length === 0) return
+    if (root.forgetting || localSaveProcess.running || root.localQueue.length === 0) return
     var q = root.localQueue[0]
     root.localQueue = root.localQueue.slice(1)
     localSaveProcess.command = ["/usr/bin/bash", root.api, "savepos"].concat(q)
-    localSaveProcess.running = true
+    localSaveProcess.start()
   }
 
   function flushPush() {
@@ -412,7 +505,7 @@ Item {
     root.lastPushAt = Date.now()
     putProcess.command = ["/usr/bin/bash", root.api, "setposition", putProcess.sent.id,
       String(putProcess.sent.ms), putProcess.sent.done ? "true" : "false"]
-    putProcess.running = true
+    putProcess.start()
   }
 
   function togglePlay() {
@@ -454,7 +547,7 @@ Item {
     root.controlQueue = []
     root.queue = []
     controlProcess.command = ["/usr/bin/bash", root.player, "stop"]
-    controlProcess.running = true
+    controlProcess.start()
     root.nowPlaying = null
     root.playerState = "idle"
     root.position = 0
@@ -462,7 +555,8 @@ Item {
   }
 
   function control(args) {
-    root.controlQueue = root.controlQueue.concat([args])
+    // Bounded: a stuck helper must not let key-repeat grow this without end.
+    root.controlQueue = root.controlQueue.concat([args]).slice(-16)
     root.nextControl()
   }
 
@@ -471,25 +565,25 @@ Item {
     var args = root.controlQueue[0]
     root.controlQueue = root.controlQueue.slice(1)
     controlProcess.command = ["/usr/bin/bash", root.player].concat(args)
-    controlProcess.running = true
+    controlProcess.start()
   }
 
   function pollPlayer() {
     if (statusProcess.running || playProcess.running || root.starting) return
     statusProcess.command = ["/usr/bin/bash", root.player, "status"]
-    statusProcess.running = true
+    statusProcess.start()
   }
 
   // On load, also look for audio still running from before a shell reload:
   // mpv is detached, so it outlives us.
   Component.onCompleted: {
     queueGetProcess.command = ["/usr/bin/bash", root.api, "getplayed", "queue"]
-    queueGetProcess.running = true
+    queueGetProcess.start()
     root.checkConfig(); root.loadSpeed(); root.pollPlayer() }
 
   function loadSpeed() {
     speedProcess.command = ["/usr/bin/bash", root.player, "getspeed"]
-    speedProcess.running = true
+    speedProcess.start()
   }
 
   Timer {
@@ -521,8 +615,9 @@ Item {
     onTriggered: root.pollPlayer()
   }
 
-  Process {
+  Op {
     id: playProcess
+    deadlineMs: 15000
     running: false
     command: []
     clearEnvironment: true
@@ -542,8 +637,9 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: speedProcess
+    deadlineMs: 15000
     running: false
     command: []
     clearEnvironment: true
@@ -554,8 +650,9 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: controlProcess
+    deadlineMs: 15000
     running: false
     command: []
     clearEnvironment: true
@@ -566,8 +663,9 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: statusProcess
+    deadlineMs: 15000
     running: false
     command: []
     clearEnvironment: true
@@ -601,7 +699,7 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: configProcess
     running: false
     command: []
@@ -609,16 +707,17 @@ Item {
     environment: Model.environment
     stdout: StdioCollector { id: configOut; waitForEnd: true }
     onExited: function(exitCode) {
+      if (configProcess.stale) return
       var info = {}
       try { info = JSON.parse(configOut.text) } catch (e) { info = {} }
       root.hasToken = info.hasToken === true
       root.storeDir = Model.text(info.store)
-      if (root.hasToken) { root.refresh(); playedGetProcess.command = ["/usr/bin/bash", root.api, "getplayed"]; playedGetProcess.running = true; nowGetProcess.command = ["/usr/bin/bash", root.api, "getplayed", "now"]; nowGetProcess.running = true }
+      if (root.hasToken) { root.refresh(); playedGetProcess.command = ["/usr/bin/bash", root.api, "getplayed"]; playedGetProcess.start(); nowGetProcess.command = ["/usr/bin/bash", root.api, "getplayed", "now"]; nowGetProcess.start() }
       else root.authState = "signedOut"
     }
   }
 
-  Process {
+  Op {
     id: playedGetProcess
     running: false
     command: []
@@ -626,6 +725,7 @@ Item {
     environment: Model.environment
     stdout: StdioCollector { id: playedGetOut; waitForEnd: true }
     onExited: function(exitCode) {
+      if (playedGetProcess.stale) return
       var kept = []
       try { kept = JSON.parse(playedGetOut.text) } catch (e) { kept = [] }
       if (!Array.isArray(kept)) return
@@ -639,7 +739,7 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: nowSaveProcess
     property string payload: ""
     running: false
@@ -650,7 +750,7 @@ Item {
     onStarted: { write(payload); payload = ""; stdinEnabled = false }
   }
 
-  Process {
+  Op {
     id: nowGetProcess
     running: false
     command: []
@@ -658,6 +758,7 @@ Item {
     environment: Model.environment
     stdout: StdioCollector { id: nowGetOut; waitForEnd: true }
     onExited: function(exitCode) {
+      if (nowGetProcess.stale) return
       var o = null
       try { o = JSON.parse(nowGetOut.text) } catch (e) { o = null }
       if (!o || typeof o !== "object") return
@@ -668,7 +769,7 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: queueGetProcess
     running: false
     command: []
@@ -687,7 +788,7 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: queueSaveProcess
     property string payload: ""
     running: false
@@ -701,7 +802,7 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: playedSaveProcess
     property string payload: ""
     running: false
@@ -719,7 +820,7 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: saveProcess
     property int session: 0
     property string payload: ""
@@ -747,15 +848,43 @@ Item {
     }
   }
 
-  Process {
+  Op {
+    id: artProcess
+    property string url: ""
+    deadlineMs: 30000
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdout: StdioCollector { id: artOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var path = Model.text(artOut.text).trim()
+      if (!artProcess.stale) {
+        if (exitCode === 0 && /^\/[A-Za-z0-9\/._-]+$/.test(path)) {
+          var next = Object.assign({}, root.artPaths)
+          next[artProcess.url] = "file://" + path
+          root.artPaths = next
+        } else {
+          var failed = Object.assign({}, root.artFailed)
+          failed[artProcess.url] = true
+          root.artFailed = failed
+        }
+      }
+      Qt.callLater(root.nextArt)
+    }
+  }
+
+  Op {
     id: forgetProcess
+    deadlineMs: 30000
+    onExited: function(exitCode) { root.forgetting = false }
     running: false
     command: []
     clearEnvironment: true
     environment: Model.environment
   }
 
-  Process {
+  Op {
     id: resumeProcess
     property var episode: null
     property var apple: null
@@ -770,12 +899,12 @@ Item {
       if (!e || !root.starting) return
       if (!root.sameEpisode(e, resumeProcess.episode)) { root.fetchResume(); return }
       var response = Model.splitResponse(resumeOut.text)
-      var found = exitCode === 0 && response.status === 200 ? Model.parsePositions(response.body) : null
+      var found = exitCode === 0 && !resumeProcess.stale && response.status === 200 ? Model.parsePositions(response.body) : null
       root.resolveResume(e, found ? found[e.id] : null)
     }
   }
 
-  Process {
+  Op {
     id: localGetProcess
     property var episode: null
     running: false
@@ -789,18 +918,18 @@ Item {
       if (!root.sameEpisode(e, localGetProcess.episode)) { root.fetchResume(); return }
       // What was just played here may not have reached the file or Apple yet.
       var mem = root.positions[e.id]
-      var local = Model.newerPosition(exitCode === 0 ? Model.parseLocalPosition(localGetOut.text) : null, mem && mem.at > 0 ? mem : null)
+      var local = Model.newerPosition(exitCode === 0 && !localGetProcess.stale ? Model.parseLocalPosition(localGetOut.text) : null, mem && mem.at > 0 ? mem : null)
       var pos = Model.newerPosition(resumeProcess.apple, local)
       if (pos) {
         var next = Object.assign({}, root.positions)
         next[e.id] = pos
-        root.positions = next
+        root.setPositions(next)
       }
       root.launch(e, Model.resumeSeconds(pos, e.durationMs))
     }
   }
 
-  Process {
+  Op {
     id: localSaveProcess
     running: false
     command: []
@@ -809,7 +938,7 @@ Item {
     onExited: function(exitCode) { if (root.localQueue.length > 0) Qt.callLater(root.nextLocal) }
   }
 
-  Process {
+  Op {
     id: putProcess
     property var sent: null
     running: false
@@ -819,19 +948,19 @@ Item {
     stdout: StdioCollector { id: putOut; waitForEnd: true }
     onExited: function(exitCode) {
       var status = Model.splitResponse(putOut.text).status
-      if (exitCode === 0 && status >= 200 && status < 300 && putProcess.sent) {
+      if (!putProcess.stale && exitCode === 0 && status >= 200 && status < 300 && putProcess.sent) {
         var s = putProcess.sent
         root.pushedKey = s.key
         var next = Object.assign({}, root.positions)
         next[s.id] = { ms: s.ms, completed: s.done, at: Date.now() }
-        root.positions = next
+        root.setPositions(next)
       }
       // A failure is retried by the next push, which finds the key unsent.
       if (root.pendingPush.length > 0) Qt.callLater(root.flushPush)
     }
   }
 
-  Process {
+  Op {
     id: positionsProcess
     property int session: 0
     running: false
@@ -847,7 +976,7 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: localLoadProcess
     property int session: 0
     running: false
@@ -861,7 +990,7 @@ Item {
     }
   }
 
-  Process {
+  Op {
     id: episodesProcess
     property int session: 0
     running: false
@@ -882,7 +1011,7 @@ Item {
         } else if (exitCode === 0 && response.status === 200) {
           var parsed = Model.parseEpisodes(response.body)
           root.authState = "ok"
-          if (parsed.ok) { root.episodes = parsed.episodes; root.errorText = ""; root.refreshPositions() }
+          if (parsed.ok) { root.artFailed = ({}); root.episodes = parsed.episodes; root.errorText = ""; root.refreshPositions() }
           else root.errorText = parsed.error
         } else {
           root.authState = Model.isTransient(exitCode, response.status) ? "offline" : "ok"

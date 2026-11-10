@@ -57,7 +57,9 @@ prepare() {
 
 # Send commands to mpv, one JSON object per line on stdin; prints its replies.
 # -t gives mpv a moment to answer before socat gives up on the quiet socket.
-ipc() { socat -t 0.3 - "UNIX-CONNECT:$sock" 2> /dev/null; }
+# The whole exchange is bounded: timeout is an absolute deadline (socat's -t
+# only covers an idle socket) and head caps what is read back.
+ipc() { timeout -k 1 3 socat -t 0.3 - "UNIX-CONNECT:$sock" 2> /dev/null | head -c 65536; return "${PIPESTATUS[0]}"; }
 alive() { [ -S "$sock" ] && printf '{"command":["get_property","pid"]}\n' | ipc | grep -q '"error":"success"'; }
 
 cmd_play() {

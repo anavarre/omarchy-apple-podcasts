@@ -23,6 +23,9 @@
 #                        it on this machine, so the played list outlives the feed
 #   getplayed            print what saveplayed kept, or nothing
 #                        (saveplayed/getplayed also take "now" or "queue")
+#   art URL              fetch one artwork image (bounded in bytes and time, no
+#                        redirects, JPEG/PNG/WebP/GIF only) into the store's art
+#                        cache and print its path
 #   forget               delete everything this plugin stored
 #
 # UNOFFICIAL. Apple publishes no API for a listener's library. This talks to
@@ -200,7 +203,7 @@ cmd_save() {
 cmd_forget() {
   refuseUnsafe
   rm -f "$store/media-user-token" "$store/dev-token"
-  rm -rf "$store/positions"
+  rm -rf "$store/positions" "$store/art"
   rm -f "$store/played.json" "$store/nowplaying.json" "$store/queue.json"
 }
 
@@ -263,6 +266,33 @@ cmd_getposall() {
   return 0
 }
 
+# Artwork is fetched here, not by the UI's image loader, so it gets the same
+# bounds as every other request: 1 MiB, 10 s, no redirect followed. Only a file
+# that starts like an image is kept. Prints the cached path.
+cmd_art() {
+  local url="${1:-}" dir="$store/art" name f t magic
+  case "$url" in http://*|https://*) ;; *) usage 'art: URL must be http:// or https://' ;; esac
+  case "$url" in *[[:space:][:cntrl:]\"\<\>\\]*|"") usage 'art: bad URL' ;; esac
+  [ "${#url}" -le 2048 ] || usage 'art: URL too long'
+  refuseUnsafe
+  [ -L "$dir" ] && { printf 'Refusing %s: it is a symlink.\n' "$dir" >&2; exit 24; }
+  mkdir -p "$dir" && chmod 700 "$store" "$dir" || { printf 'Could not create %s.\n' "$dir" >&2; exit 24; }
+  name=$(printf '%s' "$url" | sha256sum | cut -c1-40)
+  f="$dir/$name"
+  if [ -f "$f" ] && [ ! -L "$f" ]; then touch "$f"; printf '%s\n' "$f"; return 0; fi
+  t=$(mktemp "$dir/.tmp.XXXXXX") || exit 24
+  if ! fetch --max-time 10 --max-filesize 1048576 -o "$t" "$url" 2> /dev/null; then rm -f "$t"; printf 'Could not fetch artwork.\n' >&2; exit 20; fi
+  magic=$(head -c 12 "$t" | od -An -tx1 | tr -d ' \n')
+  case "$magic" in
+    ffd8ff*|89504e470d0a1a0a*|47494638*|52494646????????57454250) ;;
+    *) rm -f "$t"; printf 'Not an image.\n' >&2; exit 20 ;;
+  esac
+  chmod 600 "$t" && mv -f "$t" "$f" || { rm -f "$t"; exit 24; }
+  # Keep the newest 100 images, not an ever-growing pile.
+  ls -t "$dir" | tail -n +101 | while IFS= read -r old; do rm -f "$dir/$old"; done
+  printf '%s\n' "$f"
+}
+
 cmd_episodes() {
   local limit="${1:-}" src="${2:-latest}" ep
   case "$limit" in ''|*[!0-9]*) usage 'episodes: LIMIT must be a number' ;; esac
@@ -306,6 +336,7 @@ case "$cmd" in
   getposall) cmd_getposall "$@" ;;
   saveplayed) cmd_saveplayed "$@" ;;
   getplayed) cmd_getplayed "$@" ;;
+  art) cmd_art "$@" ;;
   forget) cmd_forget ;;
   *) usage "unknown command: $cmd" ;;
 esac

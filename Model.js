@@ -64,7 +64,31 @@ function text(value) {
 // characters) is dropped rather than passed on.
 function httpUrl(value) {
   var s = text(value).trim()
+  if (s.length > maxUrlLength) return ""
   return /^https?:\/\/[^\s\x00-\x1F\x7F"<>\\]+$/i.test(s) ? s : ""
+}
+
+// Limits on what is retained from a feed (or a stored file), applied before
+// anything reaches the UI: Apple was asked for episodeLimitMax, but the answer
+// is not trusted to honour that.
+var maxUrlLength = 2048
+var maxTextLength = 500
+var maxPositions = 500
+
+// Keeps the `max` most recently recorded positions of { id: { at, ... } }.
+function capPositions(map, max) {
+  var ids = Object.keys(map || {})
+  var limit = max === undefined ? maxPositions : max
+  if (ids.length <= limit) return map
+  ids.sort(function(a, b) { return (map[b].at || 0) - (map[a].at || 0) })
+  var out = {}
+  for (var i = 0; i < limit; i++) out[ids[i]] = map[ids[i]]
+  return out
+}
+
+function limitedText(value) {
+  var s = text(value)
+  return s.length > maxTextLength ? s.slice(0, maxTextLength) : s
 }
 
 // Apple's episode ids are decimal numbers, and that is all the scripts accept
@@ -147,9 +171,9 @@ function sanitizeEpisode(e) {
   var dur = Number(o.durationMs)
   return {
     id: episodeId(o.id),
-    title: text(o.title),
-    show: text(o.show),
-    published: text(o.published),
+    title: limitedText(o.title),
+    show: limitedText(o.show),
+    published: limitedText(o.published).slice(0, 64),
     url: httpUrl(o.url),
     artwork: httpUrl(o.artwork),
     artworkLarge: httpUrl(o.artworkLarge),
@@ -184,7 +208,7 @@ function parseEpisodes(body) {
   if (!json || !Array.isArray(json.data))
     return { ok: false, episodes: [], error: "Apple's answer had no episode list; the web API may have changed." }
   var out = []
-  for (var i = 0; i < json.data.length; i++) {
+  for (var i = 0; i < json.data.length && i < episodeLimitMax; i++) {
     var e = normalizeEpisode(json.data[i])
     if (e.title !== "" || e.id !== "") out.push(e)
   }
@@ -200,7 +224,7 @@ function parsePositions(body) {
   try { json = JSON.parse(text(body)) } catch (e) { return null }
   if (!json || !Array.isArray(json.data)) return null
   var out = {}
-  for (var i = 0; i < json.data.length; i++) {
+  for (var i = 0; i < json.data.length && i < episodeLimitMax; i++) {
     var item = json.data[i], a = (item && item.attributes) || {}
     var id = episodeId(item && item.id)
     var ms = Number(a.positionInMilliseconds)
@@ -219,7 +243,7 @@ function parseLocalPosition(out) {
 // What `podcasts-api getposall` printed ("ID MS DONE EPOCH" per line), by id.
 function parseLocalPositions(out) {
   var res = {}, lines = text(out).split("\n")
-  for (var i = 0; i < lines.length; i++) {
+  for (var i = 0; i < lines.length && i < maxPositions; i++) {
     var m = /^([0-9]+) ([0-9]+) (true|false) ([0-9]+)\s*$/.exec(lines[i])
     if (m) res[m[1]] = { ms: Number(m[2]), completed: m[3] === "true", at: Number(m[4]) * 1000 }
   }

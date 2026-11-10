@@ -36,7 +36,9 @@ class H(BaseHTTPRequestHandler):
     def send(self, code, body, ctype="application/json"):
         data = body if isinstance(body, bytes) else body.encode()
         self.send_response(code); self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+        self.send_header("Content-Length", str(len(data))); self.end_headers()
+        try: self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError): pass  # the client hung up on an oversized body
     def authed(self):
         if self.headers.get("Authorization") != "Bearer " + DEV:
             self.send(401, '{"errors":[{"status":"401"}]}'); return False
@@ -58,6 +60,12 @@ class H(BaseHTTPRequestHandler):
         POSITIONS[id] = body["attributes"]
         self.send(204, "")
     def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/art/ok.png": return self.send(200, b"\x89PNG\r\n\x1a\n" + b"0" * 64, "image/png")
+        if path == "/art/text.png": return self.send(200, "<html>not an image</html>", "image/png")
+        if path == "/art/big.png": return self.send(200, b"\x89PNG\r\n\x1a\n" + b"0" * 2000000, "image/png")
+        if path == "/art/redir.png":
+            self.send_response(302); self.send_header("Location", "/art/ok.png"); self.send_header("Content-Length", "0"); self.end_headers(); return
         p = self.path.split("?")[0]
         if p == POS_PATH:
             if not self.authed(): return

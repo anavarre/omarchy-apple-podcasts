@@ -219,3 +219,18 @@ test("recentlyFinished keeps a finished episode for the chosen days", () => {
   assert.strictEqual(M.recentlyFinished({ completed: true, at: 0 }, now, 7), false);
   assert.strictEqual(M.recentlyFinished(undefined, now, 7), false);
 });
+
+test("retained data is bounded", () => {
+  const many = { data: Array.from({ length: 100 }, (_, i) => ({ id: String(i + 1), attributes: { name: "t".repeat(5000) } })) };
+  const r = M.parseEpisodes(JSON.stringify(many));
+  assert.strictEqual(r.episodes.length, M.episodeLimitMax);
+  assert.strictEqual(r.episodes[0].title.length, M.maxTextLength);
+  const pos = { data: Array.from({ length: 100 }, (_, i) => ({ id: String(i + 1), attributes: { positionInMilliseconds: 5 } })) };
+  assert.strictEqual(Object.keys(M.parsePositions(JSON.stringify(pos))).length, M.episodeLimitMax);
+  assert.strictEqual(M.httpUrl("https://a/" + "x".repeat(3000)), "");
+  const big = {};
+  for (let i = 1; i <= 700; i++) big[String(i)] = { ms: 1, completed: false, at: i };
+  const kept = M.capPositions(big);
+  assert.strictEqual(Object.keys(kept).length, M.maxPositions);
+  assert.ok(kept["700"] && !kept["1"]);
+});
