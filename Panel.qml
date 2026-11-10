@@ -80,6 +80,7 @@ Panel {
     { keys: "← / →", what: "Skip back / forward" },
     { keys: "o", what: "Open the episode on Apple's site" },
     { keys: "n", what: "Queue the selected episode to play next" },
+    { keys: "Drag \u283F", what: "Reorder the queue by dragging an episode by its handle" },
     { keys: "Shift + R", what: "Remove the selected episode from the queue" },
     { keys: "Enter", what: "On a section title, collapse or expand the section" },
     { keys: "s", what: "Stop" },
@@ -1116,6 +1117,17 @@ Panel {
                   required property var modelData
                   width: parent.width
                   readonly property bool isHeader: row.modelData.isHeader === true
+                  // Queue rows follow the QUEUE title and can be dragged to reorder.
+                  readonly property bool isQueueRow: !row.isHeader && root.queueEpisodes.length > 0
+                    && row.index >= 1 && row.index <= root.queueEpisodes.length
+                  property bool dragging: false
+                  property real dragOffset: 0
+                  readonly property real stride: row.height + listColumn.spacing
+                  readonly property int dragFrom: row.index - 1
+                  readonly property int dragTo: Math.max(0, Math.min(root.queueEpisodes.length - 1,
+                    row.dragFrom + Math.round(row.dragOffset / row.stride)))
+                  z: row.dragging ? 10 : 0
+                  transform: Translate { y: row.dragOffset }
                   height: row.isHeader ? sectionTitle.implicitHeight + Style.space(10) : rowText.implicitHeight + Style.space(12)
                   radius: Style.space(6)
                   color: row.index === root.selected ? Qt.alpha(root.accent, 0.18) : "transparent"
@@ -1160,6 +1172,7 @@ Panel {
                     anchors.left: rowIcon.right
                     anchors.right: parent.right
                     anchors.margins: Style.space(8)
+                    anchors.rightMargin: row.isQueueRow ? Style.space(30) : Style.space(8)
                     spacing: Style.space(2)
 
                     // The selected row's title scrolls sideways when it doesn't fit.
@@ -1257,6 +1270,63 @@ Panel {
                     hoverEnabled: true
                     onEntered: root.selected = row.index
                     onClicked: root.openEpisode(row.index)
+                  }
+
+                  // Drag handle: reorder the queue by dragging the row up or down.
+                  Text {
+                    visible: row.isQueueRow
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(10)
+                    text: "\u283F"
+                    color: row.dragging || dragArea.containsMouse ? root.accent : root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fs(Style.font.body)
+                  }
+                  MouseArea {
+                    id: dragArea
+                    visible: row.isQueueRow
+                    enabled: row.isQueueRow
+                    width: Style.space(30)
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    hoverEnabled: true
+                    preventStealing: true
+                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    property real startY: 0
+                    function columnY(mouse) { return mapToItem(listColumn, mouse.x, mouse.y).y }
+                    onPressed: function(mouse) {
+                      startY = columnY(mouse) - row.dragOffset
+                      row.dragging = true
+                      root.selected = row.index
+                    }
+                    onPositionChanged: function(mouse) {
+                      if (!pressed) return
+                      var lo = -row.dragFrom * row.stride
+                      var hi = (root.queueEpisodes.length - 1 - row.dragFrom) * row.stride
+                      row.dragOffset = Math.max(lo, Math.min(hi, columnY(mouse) - startY))
+                    }
+                    onReleased: {
+                      var to = row.dragTo
+                      row.dragging = false
+                      row.dragOffset = 0
+                      if (to !== row.dragFrom) {
+                        root.podcasts.moveInQueue(row.dragFrom, to)
+                        root.selected = to + 1
+                      }
+                    }
+                    onCanceled: { row.dragging = false; row.dragOffset = 0 }
+                  }
+                  // Where the dragged row will land.
+                  Rectangle {
+                    visible: row.dragging && row.dragTo !== row.dragFrom
+                    width: parent.width
+                    height: Style.space(2)
+                    radius: height / 2
+                    color: root.accent
+                    y: -row.dragOffset + (row.dragTo - row.dragFrom) * row.stride
+                       + (row.dragTo > row.dragFrom ? row.height + listColumn.spacing / 2 : -listColumn.spacing / 2) - height / 2
                   }
 
                   // Play straight from the list: the icon turns into a button on hover.

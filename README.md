@@ -50,6 +50,7 @@ Click an episode to play it. While something plays, a card with large artwork an
 | `←` / `→` | Skip back / forward |
 | `o` | Open the episode on Apple's site |
 | `n` | Queue the selected episode; it starts by itself when the current one ends (or right away if nothing is playing) |
+| Drag `⠿` | Reorder the queue by dragging an episode by its handle on the right of the row |
 | `Shift` + `R` | Remove the selected episode from the queue |
 | `Enter` | On a section title (Queue, Unplayed, Played), collapse or expand the section |
 | `s` | Stop |

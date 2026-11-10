@@ -287,6 +287,15 @@ Item {
     root.queue = root.queue.filter(function(q) { return !root.sameEpisode(q, episode) })
   }
 
+  // Moves a queued episode to another place in the queue (0-based positions).
+  function moveInQueue(from, to) {
+    if (from === to || from < 0 || from >= root.queue.length) return
+    to = Math.max(0, Math.min(root.queue.length - 1, to))
+    var q = root.queue.slice()
+    q.splice(to, 0, q.splice(from, 1)[0])
+    root.queue = q
+  }
+
   function playNext() {
     while (root.queue.length > 0) {
       var next = root.queue[0]
