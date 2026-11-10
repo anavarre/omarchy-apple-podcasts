@@ -38,7 +38,7 @@ Apple offers no sign-in for third parties, so the widget borrows your web-player
 3. Copy the `media-user-token` cookie value (browser dev tools → Storage/Application → Cookies).
 4. Paste it into the panel.
 
-The token is stored privately on your computer in `~/.config/omarchy/apple-podcasts/` and is only sent to Apple.
+The token is stored privately on your computer in `~/.config/omarchy/apple-podcasts/` and is only sent to Apple. Pasting into the sign-in field goes through a bounded clipboard read (2 KiB, 2 second limit); anything larger is rejected.
 
 ## Using it
 

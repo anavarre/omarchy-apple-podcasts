@@ -8,4 +8,5 @@ failed=""
 echo "== Model.js"; node --test tests/model.test.js > /dev/null 2>&1 && echo ok || { node --test tests/model.test.js; failed="$failed model"; }
 echo "== bin/podcasts-api"; bash tests/api.sh || failed="$failed api"
 echo "== bin/podcasts-player"; bash tests/player.sh || failed="$failed player"
+echo "== bin/podcasts-paste"; bash tests/paste.sh || failed="$failed paste"
 [ -z "$failed" ] && echo "ALL PASSED" || { echo "FAILED:$failed"; exit 1; }

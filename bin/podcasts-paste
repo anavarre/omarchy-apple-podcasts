@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Bounded clipboard read for the sign-in field. The panel never lets Qt read the
+# clipboard itself: Qt materialises the whole selection before any length limit
+# applies, and its Wayland reader waits as long as bytes keep trickling in.
+# Here the transfer is capped in bytes (head closes the pipe, so wl-paste gets
+# SIGPIPE) and in wall-clock time (timeout kills it). Oversized or slow data is
+# rejected, never truncated. Usage: podcasts-paste [primary]
+set -u
+max=2048
+deadline=2
+args=(--no-newline --type text)
+[ "${1:-}" = primary ] && args+=(--primary)
+out=$(timeout --kill-after=0.5 "$deadline" wl-paste "${args[@]}" 2>/dev/null | head -c $((max + 1)) | tr -d '\0'; exit "${PIPESTATUS[0]}")
+status=$?
+[ "${#out}" -le "$max" ] || exit 2
+# 141 is wl-paste hit by SIGPIPE, which only happens once head has its cap.
+case $status in 0|141) ;; *) exit 1 ;; esac
+printf '%s' "$out"

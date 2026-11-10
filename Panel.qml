@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -45,7 +46,8 @@ Panel {
   readonly property bool loading: root.podcasts.loading === true
   readonly property bool saving: root.podcasts.saving === true
   readonly property string errorText: root.podcasts.errorText
-  readonly property string signInError: root.podcasts.signInError
+  property string pasteError: ""
+  readonly property string signInError: root.pasteError !== "" ? root.pasteError : root.podcasts.signInError
   readonly property var episodes: root.podcasts.episodes
   readonly property bool signedIn: root.authenticated || root.authState === "offline"
 
@@ -352,8 +354,37 @@ Panel {
     if (root.duration > 0 && width > 0) root.podcasts.seekTo(root.duration * Math.max(0, Math.min(1, x / width)))
   }
 
+  // The token is pasted through bin/podcasts-paste (byte cap, hard deadline),
+  // never through Qt's own clipboard path, which reads without bounds.
+  readonly property int maxTokenLength: 2048
+  function pasteToken(primary) {
+    if (pasteProcess.running) return
+    pasteProcess.command = ["/usr/bin/bash", Model.localPath(Qt.resolvedUrl("bin/podcasts-paste"))].concat(primary ? ["primary"] : [])
+    pasteProcess.running = true
+  }
+
+  Process {
+    id: pasteProcess
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdout: StdioCollector { id: pasteOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var t = pasteOut.text.replace(/[\r\n]/g, "").trim()
+      if (exitCode !== 0 || t === "" || t.length > root.maxTokenLength || !/^[\x21-\x7e]+$/.test(t)) {
+        root.pasteError = exitCode === 2 || t.length > root.maxTokenLength
+          ? "The clipboard holds too much data to be a token." : "Nothing usable to paste from the clipboard."
+        return
+      }
+      root.pasteError = ""
+      tokenField.text = t
+    }
+  }
+
   function submitToken() {
-    if (tokenField.text.trim() === "" || root.saving) return
+    if (tokenField.text.trim() === "" || tokenField.text.length > root.maxTokenLength || root.saving) return
+    root.pasteError = ""
     root.podcasts.signIn(tokenField.text)
     tokenField.text = ""
   }
@@ -475,6 +506,22 @@ Panel {
             placeholderText: "media-user-token"
             onAccepted: root.submitToken()
             Keys.onEscapePressed: root.close()
+            // Every native paste route is swallowed and sent to pasteToken().
+            Keys.onPressed: function(event) {
+              if (event.matches(StandardKey.Paste)
+                  || (event.key === Qt.Key_Insert && (event.modifiers & Qt.ShiftModifier))
+                  || (event.key === Qt.Key_V && (event.modifiers & Qt.ControlModifier))) {
+                root.pasteToken(false)
+                event.accepted = true
+              }
+            }
+            // Middle click (primary selection) and the context menu would
+            // otherwise reach Qt's unbounded paste.
+            MouseArea {
+              anchors.fill: parent
+              acceptedButtons: Qt.MiddleButton | Qt.RightButton
+              onClicked: function(mouse) { root.pasteToken(mouse.button === Qt.MiddleButton) }
+            }
           }
 
           Row {
