@@ -102,6 +102,10 @@ run art "http://127.0.0.1:$port/art/big.png" > /dev/null 2>&1; check "art oversi
 run art "http://127.0.0.1:$port/art/huge.png" > /dev/null 2>&1; check "art over pixel budget refused (20)" $? 20
 run art "http://127.0.0.1:$port/art/noheader.png" > /dev/null 2>&1; check "art with unreadable size refused (20)" $? 20
 run art "http://127.0.0.1:$port/art/redir.png" > /dev/null 2>&1; check "art redirect not followed (20)" $? 20
+# A file cached before the budget existed is revalidated, not trusted.
+u="http://127.0.0.1:$port/art/ok.png"; n=$(printf '%s' "$u" | sha256sum | cut -c1-40)
+printf '\211PNG\r\n\032\n\0\0\0\rIHDR\0\0\117\040\0\0\117\040\010\006\0\0\0' > "$tmp/store/art/$n"
+art=$(run art "$u"); check "art over-budget cache hit is refetched" "$([ "$(head -c 20 "$art" | tail -c 4 | od -An -tx1 | tr -d " \n")" = 00000001 ] && echo yes)" yes
 run art "file:///etc/passwd" > /dev/null 2>&1; check "art non-http refused (64)" $? 64
 tmpleft=0; for f in "$tmp"/store/art/.tmp*; do [ -e "$f" ] && tmpleft=$((tmpleft + 1)); done
 check "art leaves no temp files" "$tmpleft" 0

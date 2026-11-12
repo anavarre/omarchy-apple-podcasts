@@ -19,8 +19,9 @@ Item {
   // arms a deadline. A helper still running at the deadline is stopped in
   // bounded steps: terminate, then SIGKILL to it and its whole process group
   // (it runs under setsid, so curl, mpv and the like go with it), then, if even
-  // that is not acknowledged, the run is declared over. One that never reported
-  // a start (FailedToStart) gets a synthetic exit. Either way each handler's
+  // that is not acknowledged, the kill is repeated and the slot stays held until
+  // the real exit. One that never reported a start (FailedToStart) gets a
+  // synthetic exit. Either way each handler's
   // normal failure path runs, restoring its flags and draining its queue.
   //
   // One child at a time: start() while a run is still winding down queues the
@@ -36,6 +37,8 @@ Item {
     property bool queued: false
     // 0: running normally, 1: terminate sent, 2: killed
     property int phase: 0
+    // Set once a signalled run reads as not running without its exit delivered.
+    property bool lost: false
     readonly property bool stale: op.born !== root.session
     function start() {
       if (op.armed) { op.queued = true; op.wind(); return }
@@ -46,6 +49,7 @@ Item {
       op.born = root.session
       op.armed = true
       op.phase = 0
+      op.lost = false
       var c = op.command
       if (c.length > 0 && c[0] !== "/usr/bin/setsid") op.command = ["/usr/bin/setsid", "-w"].concat(c)
       op.watchdog.interval = op.deadlineMs
@@ -57,19 +61,26 @@ Item {
       if (op.armed) op.wind()
     }
     // Moves a live run one step toward being gone and re-arms the timer for the next.
+    // A child that is still running is never declared finished: the slot stays
+    // occupied (so no replacement starts and forget keeps waiting) and the kill
+    // is repeated until the real exit is delivered. A synthetic exit is only for
+    // a run with no live child: one that never started, or that is gone but whose
+    // exit was not seen within one more grace period.
     function wind() {
       if (!op.armed) return
-      if (!op.running) { op.finish(); return }
-      if (op.phase === 0) { op.phase = 1; op.running = false }
-      else if (op.phase === 1) {
+      if (!op.running) {
+        if (op.phase === 0 || op.lost) { op.finish(); return }
+        op.lost = true
+      } else if (op.phase === 0) { op.phase = 1; op.running = false }
+      else {
         op.phase = 2
         if (op.processId > 0) Quickshell.execDetached(["/usr/bin/kill", "-KILL", "--", "-" + op.processId])
         op.signal(9)
-      } else { op.finish(); return }
+      }
       op.watchdog.interval = op.graceMs
       op.watchdog.restart()
     }
-    // Gives up on a child that can't be reaped: the run is over for the caller.
+    // Completes a run that has no live child, for the caller's failure path.
     function finish() {
       op.watchdog.stop()
       op.exited(-1, 0)

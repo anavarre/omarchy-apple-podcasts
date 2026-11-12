@@ -370,6 +370,24 @@ Panel {
     pasteProcess.command = ["/usr/bin/bash", Model.localPath(Qt.resolvedUrl("bin/podcasts-paste"))].concat(primary ? ["primary"] : [])
     pasteProcess.armed = true
     pasteProcess.running = true
+    // A failed launch emits no exited signal: clear the admission flag ourselves.
+    if (!pasteProcess.running) pasteProcess.armed = false
+    else pasteDeadline.restart()
+  }
+  Timer {
+    id: pasteDeadline
+    interval: 10000
+    onTriggered: if (pasteProcess.armed) {
+      if (pasteProcess.running) pasteProcess.running = false
+      else pasteProcess.armed = false
+      pasteGrace.restart()
+    }
+  }
+  // If terminate was not enough, stop holding the admission flag anyway.
+  Timer {
+    id: pasteGrace
+    interval: 2000
+    onTriggered: pasteProcess.armed = false
   }
 
   // Bumped whenever a paste in flight stops being wanted (the form or panel
@@ -397,6 +415,8 @@ Panel {
     onRunningChanged: if (running) pasteProcess.armed = true
     onExited: function(exitCode) {
       pasteProcess.armed = false
+      pasteDeadline.stop()
+      pasteGrace.stop()
       if (pasteProcess.born !== root.pasteEpoch || !root.pasteWanted) return
       var t = pasteOut.text.replace(/[\r\n]/g, "").trim()
       if (exitCode !== 0 || t === "" || t.length > root.maxTokenLength || !/^[\x21-\x7e]+$/.test(t)) {

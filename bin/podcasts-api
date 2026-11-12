@@ -309,8 +309,19 @@ imageDims() {
   [ "$W" -gt 0 ] && [ "$H" -gt 0 ]
 }
 
+# Magic bytes plus the side/pixel budget, for fresh downloads and cache hits.
+artOk() {
+  local magic
+  magic=$(head -c 12 "$1" | od -An -tx1 | tr -d ' \n')
+  case "$magic" in
+    ffd8ff*|89504e470d0a1a0a*|47494638*|52494646????????57454250) ;;
+    *) return 1 ;;
+  esac
+  imageDims "$1" && [ "$W" -le "$artMaxSide" ] && [ "$H" -le "$artMaxSide" ] && [ $((W * H)) -le "$artMaxPixels" ]
+}
+
 cmd_art() {
-  local url="${1:-}" dir="$store/art" name f t magic
+  local url="${1:-}" dir="$store/art" name f t
   case "$url" in http://*|https://*) ;; *) usage 'art: URL must be http:// or https://' ;; esac
   case "$url" in *[[:space:][:cntrl:]\"\<\>\\]*|"") usage 'art: bad URL' ;; esac
   [ "${#url}" -le 2048 ] || usage 'art: URL too long'
@@ -319,17 +330,14 @@ cmd_art() {
   mkdir -p "$dir" && chmod 700 "$store" "$dir" || { printf 'Could not create %s.\n' "$dir" >&2; exit 24; }
   name=$(printf '%s' "$url" | sha256sum | cut -c1-40)
   f="$dir/$name"
-  if [ -f "$f" ] && [ ! -L "$f" ]; then touch "$f"; printf '%s\n' "$f"; return 0; fi
+  if [ -f "$f" ] && [ ! -L "$f" ]; then
+    # Cached by an older version too: revalidate before handing the bytes out.
+    if artOk "$f"; then touch "$f"; printf '%s\n' "$f"; return 0; fi
+    rm -f "$f"
+  fi
   t=$(mktemp "$dir/.tmp.XXXXXX") || exit 24
   if ! fetch --max-time 10 --max-filesize 1048576 -o "$t" "$url" 2> /dev/null; then rm -f "$t"; printf 'Could not fetch artwork.\n' >&2; exit 20; fi
-  magic=$(head -c 12 "$t" | od -An -tx1 | tr -d ' \n')
-  case "$magic" in
-    ffd8ff*|89504e470d0a1a0a*|47494638*|52494646????????57454250) ;;
-    *) rm -f "$t"; printf 'Not an image.\n' >&2; exit 20 ;;
-  esac
-  if ! imageDims "$t" || [ "$W" -gt "$artMaxSide" ] || [ "$H" -gt "$artMaxSide" ] || [ $((W * H)) -gt "$artMaxPixels" ]; then
-    rm -f "$t"; printf 'Image dimensions unreadable or over budget.\n' >&2; exit 20
-  fi
+  if ! artOk "$t"; then rm -f "$t"; printf 'Not an image, or dimensions unreadable or over budget.\n' >&2; exit 20; fi
   chmod 600 "$t" && mv -f "$t" "$f" || { rm -f "$t"; exit 24; }
   # Keep the newest 100 images, not an ever-growing pile.
   ls -t "$dir" | tail -n +101 | while IFS= read -r old; do rm -f "$dir/$old"; done
