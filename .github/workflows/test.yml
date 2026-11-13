@@ -33,7 +33,7 @@ jobs:
         run: pacman -S --noconfirm --needed mpv socat shellcheck
       - name: Lint
         run: |
-          shellcheck -S warning bin/podcasts-api bin/podcasts-player bin/podcasts-paste bin/podcasts-superwhisper tests/api.sh tests/player.sh tests/paste.sh tests/run
+          shellcheck -S warning bin/podcasts-api bin/podcasts-player bin/podcasts-paste tests/api.sh tests/player.sh tests/paste.sh tests/run
           python3 -m json.tool manifest.json > /dev/null
       # The report names the exact commit it validated, so a passing run can be
       # tied to the code it checked.
