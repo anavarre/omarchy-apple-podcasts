@@ -31,6 +31,9 @@ var environment = {
   PULSE_SERVER: null,
   PULSE_RUNTIME_PATH: null,
   PIPEWIRE_RUNTIME_DIR: null,
+  // The session bus, where mpv's MPRIS bridge registers the player so dictation
+  // tools and media keys can pause it.
+  DBUS_SESSION_BUS_ADDRESS: null,
   PODCASTS_WEB_BASE: null,
   https_proxy: null,
   HTTPS_PROXY: null,

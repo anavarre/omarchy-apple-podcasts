@@ -101,6 +101,19 @@ Item {
 
   readonly property string api: Model.localPath(Qt.resolvedUrl("bin/podcasts-api"))
   readonly property string player: Model.localPath(Qt.resolvedUrl("bin/podcasts-player"))
+  readonly property string superwhisperFix: Model.localPath(Qt.resolvedUrl("bin/podcasts-superwhisper"))
+
+  // Once per load: lets Superwhisper pause the episode while dictating, on
+  // systems where its media bridge picks up a Python without PyGObject. A no-op
+  // everywhere else; see bin/podcasts-superwhisper. No deadline: it may wait
+  // for Superwhisper to finish a dictation before restarting it.
+  Process {
+    id: superwhisperProcess
+    running: false
+    command: ["/usr/bin/bash", root.superwhisperFix]
+    clearEnvironment: true
+    environment: Model.environment
+  }
 
   // Pushed in by the bar widget, the only side the shell injects settings into.
   // How many episodes the panel shows at a time; all of them are fetched.
@@ -643,7 +656,8 @@ Item {
   Component.onCompleted: {
     queueGetProcess.command = ["/usr/bin/bash", root.api, "getplayed", "queue"]
     queueGetProcess.start()
-    root.checkConfig(); root.loadSpeed(); root.pollPlayer() }
+    root.checkConfig(); root.loadSpeed(); root.pollPlayer()
+    superwhisperProcess.running = true }
 
   function loadSpeed() {
     speedProcess.command = ["/usr/bin/bash", root.player, "getspeed"]

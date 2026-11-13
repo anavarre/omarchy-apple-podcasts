@@ -10,7 +10,19 @@ A bar icon that opens a panel with your latest Apple Podcasts episodes and plays
 
 ## Requirements
 
-`mpv` and `socat` (for playback), plus `curl`.
+`mpv` and `socat` (for playback), plus `curl`. With `mpv-mpris` (part of Omarchy's base
+install), the player shows up as a regular media player, so media keys, `playerctl` and
+dictation tools such as Superwhisper and voxtype can pause the episode.
+
+### Pausing while dictating with Superwhisper
+
+Superwhisper pauses media through a Python helper that runs `env python3`. If a global mise
+or pyenv Python without PyGObject comes first in your session `PATH`, that helper fails and
+nothing gets paused. When the plugin loads, `bin/podcasts-superwhisper` detects this case,
+and only this case. It then writes
+`~/.config/systemd/user/superwhisper.service.d/omarchy-apple-podcasts-python.conf`, which
+puts `/usr/bin` first in Superwhisper's `PATH`, and restarts Superwhisper once it is idle.
+It does nothing if Superwhisper is not installed, already works, or already sets its own `PATH`.
 
 ## Install
 
@@ -85,7 +97,14 @@ rm -r ~/.config/omarchy/apple-podcasts
 omarchy-shell shell rescanPlugins
 ```
 
-The last `rm` deletes your saved sign-in token and local listening positions. You can also remove the widget from the bar in Omarchy's bar settings. Your listening history on Apple is untouched.
+If the plugin added the Superwhisper drop-in (see above), remove it too, or leave it there to keep dictation pausing other players:
+
+```sh
+rm ~/.config/systemd/user/superwhisper.service.d/omarchy-apple-podcasts-python.conf
+systemctl --user daemon-reload && systemctl --user restart superwhisper
+```
+
+The `rm -r` above deletes your saved sign-in token and local listening positions. You can also remove the widget from the bar in Omarchy's bar settings. Your listening history on Apple is untouched.
 
 ## License
 

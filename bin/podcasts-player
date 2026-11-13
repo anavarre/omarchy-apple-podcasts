@@ -71,13 +71,23 @@ cmd_play() {
   prepare
   alive && { printf '{"command":["quit"]}\n' | ipc > /dev/null; sleep 0.2; }
   rm -f "$sock"
+  # The one script mpv does load is the system's MPRIS bridge (mpv-mpris), so
+  # dictation tools (voxtype, Superwhisper), media keys and playerctl can pause
+  # and resume the episode. Only a root-owned copy in the package's own
+  # directory is used, never anything from the user's mpv config.
+  local mpris=() so
+  for so in /usr/lib/mpv-mpris/mpris.so /usr/lib/mpv/mpris.so; do
+    if [ -f "$so" ] && [ ! -L "$so" ] && [ "$(stat -c %u "$so")" = 0 ] && [ ! -w "$so" ]; then
+      mpris=(--script="$so"); break
+    fi
+  done
   # --no-config, --load-scripts=no and --ytdl=no: neither the user's mpv.conf,
   # their Lua/JS scripts nor a youtube-dl hook gets to run on a URL that came
   # from a remote catalogue. After `--` everything is a file name, so a URL
   # can never be read as an option.
   setsid -f mpv --no-config --load-scripts=no --no-video --ytdl=no --really-quiet --force-window=no \
     --idle=no --audio-display=no --input-ipc-server="$sock" --speed="$(saved_speed)" --start="$start" \
-    --force-media-title="$title" ${PODCASTS_MPV_AO:+--ao="$PODCASTS_MPV_AO"} \
+    --force-media-title="$title" ${PODCASTS_MPV_AO:+--ao="$PODCASTS_MPV_AO"} "${mpris[@]}" \
     -- "$url" > /dev/null 2>&1 < /dev/null
   for _ in $(seq 40); do alive && return 0; sleep 0.1; done
   printf 'mpv did not start.\n' >&2; exit 31
