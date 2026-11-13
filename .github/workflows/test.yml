@@ -21,7 +21,11 @@ jobs:
         run: pacman -Syu --noconfirm git python
       # Third-party actions pinned to a commit, so a moved tag cannot change
       # what runs here.
+      # The token is not left in .git/config for the steps that follow (they run
+      # the repository's own scripts, on pull requests too).
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
@@ -29,7 +33,27 @@ jobs:
         run: pacman -S --noconfirm --needed mpv socat shellcheck
       - name: Lint
         run: |
-          shellcheck -S warning bin/podcasts-api bin/podcasts-player tests/api.sh tests/player.sh tests/run
+          shellcheck -S warning bin/podcasts-api bin/podcasts-player bin/podcasts-paste bin/podcasts-superwhisper tests/api.sh tests/player.sh tests/paste.sh tests/run
           python3 -m json.tool manifest.json > /dev/null
+      # The report names the exact commit it validated, so a passing run can be
+      # tied to the code it checked.
       - name: Tests
-        run: CI=1 tests/run
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          {
+            echo "commit: $(git rev-parse HEAD)"
+            echo "expected: $GITHUB_SHA"
+            echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+            echo
+          } > validation-report.txt
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "checked-out commit differs from GITHUB_SHA" | tee -a validation-report.txt; exit 1; }
+          set -o pipefail
+          CI=1 tests/run 2>&1 | tee -a validation-report.txt
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: validation-report-${{ github.sha }}
+          path: validation-report.txt
+          if-no-files-found: error

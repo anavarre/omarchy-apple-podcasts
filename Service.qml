@@ -340,7 +340,7 @@ Item {
     root.artFailed = ({})
     root.errorText = ""
     var cancel = [saveProcess, nowSaveProcess, queueSaveProcess, playedSaveProcess, localSaveProcess, putProcess,
-      episodesProcess, positionsProcess, localLoadProcess, playedGetProcess, nowGetProcess, configProcess, artProcess]
+      episodesProcess, positionsProcess, localLoadProcess, playedGetProcess, nowGetProcess, queueGetProcess, configProcess, artProcess]
     for (var i = 0; i < cancel.length; i++) cancel[i].cancel()
     root.maybeForget()
   }
@@ -855,6 +855,8 @@ Item {
     environment: Model.environment
     stdout: StdioCollector { id: queueGetOut; waitForEnd: true }
     onExited: function(exitCode) {
+      // Forgotten meanwhile: restoring the old queue would store it again.
+      if (queueGetProcess.stale || exitCode !== 0) return
       var kept = []
       try { kept = JSON.parse(queueGetOut.text) } catch (e) { kept = [] }
       if (!Array.isArray(kept)) return

@@ -205,6 +205,9 @@ cmd_forget() {
   rm -f "$store/media-user-token" "$store/dev-token"
   rm -rf "$store/positions" "$store/art"
   rm -f "$store/played.json" "$store/nowplaying.json" "$store/queue.json"
+  # Temp files of a write that was killed before its rename: one of them may
+  # hold the token.
+  rm -f "$store"/.media-user-token.?* "$store"/.dev-token.?* "$store"/.tmp.?*
 }
 
 cmd_saveplayed() {
@@ -286,7 +289,8 @@ imageDims() {
     71) # GIF: logical screen, little-endian
       W=$(( b[6] | b[7]<<8 )); H=$(( b[8] | b[9]<<8 )) ;;
     82) # WebP: lossy (VP8 ), lossless (VP8L) or extended (VP8X)
-      case "${b[12]}.${b[13]}.${b[14]}.${b[15]}" in
+      # A truncated file has no such bytes; that is "unreadable", not a crash.
+      case "${b[12]:-}.${b[13]:-}.${b[14]:-}.${b[15]:-}" in
         86.80.56.32) W=$(( (b[26] | b[27]<<8) & 16383 )); H=$(( (b[28] | b[29]<<8) & 16383 )) ;;
         86.80.56.76) W=$(( ((b[21] | b[22]<<8 | b[23]<<16 | b[24]<<24) & 16383) + 1 )); H=$(( (((b[21] | b[22]<<8 | b[23]<<16 | b[24]<<24) >> 14) & 16383) + 1 )) ;;
         86.80.56.88) W=$(( (b[24] | b[25]<<8 | b[26]<<16) + 1 )); H=$(( (b[27] | b[28]<<8 | b[29]<<16) + 1 )) ;;
@@ -295,8 +299,8 @@ imageDims() {
       local n=0
       while [ "$n" -lt 400 ] && [ -n "${b[i+3]:-}" ]; do
         n=$((n + 1))
-        [ "${b[i]}" = 255 ] || return 1
-        m=${b[i+1]}
+        [ "${b[i]:-}" = 255 ] || return 1
+        m=${b[i+1]:-0}
         if [ "$m" = 255 ]; then i=$((i + 1)); continue; fi
         if [ "$m" = 1 ] || { [ "$m" -ge 208 ] && [ "$m" -le 215 ]; }; then i=$((i + 2)); continue; fi
         if [ "$m" -ge 192 ] && [ "$m" -le 207 ] && [ "$m" != 196 ] && [ "$m" != 200 ] && [ "$m" != 204 ]; then
@@ -335,7 +339,12 @@ cmd_art() {
     if artOk "$f"; then touch "$f"; printf '%s\n' "$f"; return 0; fi
     rm -f "$f"
   fi
+  # A download cut short by a kill leaves its temp file behind, and the pruning
+  # below does not list dot files: clear out any that are no longer in use.
+  find "$dir" -maxdepth 1 -type f -name '.tmp.*' -mmin +5 -delete 2> /dev/null
   t=$(mktemp "$dir/.tmp.XXXXXX") || exit 24
+  # However this command ends, the temp file does not stay.
+  arttmp=$t; trap 'rm -f "$arttmp"' EXIT
   if ! fetch --max-time 10 --max-filesize 1048576 -o "$t" "$url" 2> /dev/null; then rm -f "$t"; printf 'Could not fetch artwork.\n' >&2; exit 20; fi
   if ! artOk "$t"; then rm -f "$t"; printf 'Not an image, or dimensions unreadable or over budget.\n' >&2; exit 20; fi
   chmod 600 "$t" && mv -f "$t" "$f" || { rm -f "$t"; exit 24; }

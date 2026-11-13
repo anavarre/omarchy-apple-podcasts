@@ -101,6 +101,8 @@ run art "http://127.0.0.1:$port/art/text.png" > /dev/null 2>&1; check "art non-i
 run art "http://127.0.0.1:$port/art/big.png" > /dev/null 2>&1; check "art oversized refused (20)" $? 20
 run art "http://127.0.0.1:$port/art/huge.png" > /dev/null 2>&1; check "art over pixel budget refused (20)" $? 20
 run art "http://127.0.0.1:$port/art/noheader.png" > /dev/null 2>&1; check "art with unreadable size refused (20)" $? 20
+run art "http://127.0.0.1:$port/art/short.webp" > /dev/null 2>&1; check "art truncated WebP refused (20)" $? 20
+run art "http://127.0.0.1:$port/art/short.jpg" > /dev/null 2>&1; check "art truncated JPEG refused (20)" $? 20
 run art "http://127.0.0.1:$port/art/redir.png" > /dev/null 2>&1; check "art redirect not followed (20)" $? 20
 # A file cached before the budget existed is revalidated, not trusted.
 u="http://127.0.0.1:$port/art/ok.png"; n=$(printf '%s' "$u" | sha256sum | cut -c1-40)
@@ -110,6 +112,8 @@ run art "file:///etc/passwd" > /dev/null 2>&1; check "art non-http refused (64)"
 tmpleft=0; for f in "$tmp"/store/art/.tmp*; do [ -e "$f" ] && tmpleft=$((tmpleft + 1)); done
 check "art leaves no temp files" "$tmpleft" 0
 
+# What a save killed before its rename leaves behind goes too.
+printf '%s' "$good" > "$tmp/store/.media-user-token.abc123"; : > "$tmp/store/.tmp.abc123"; : > "$tmp/store/.dev-token.abc123"
 run forget; check "forget empties store" "$(ls -A "$tmp/store" | wc -l)" 0
 mkdir "$tmp/real"; ln -s "$tmp/real" "$tmp/link"
 echo "$good" | PODCASTS_PLUGIN_DIR=$tmp/link run save > /dev/null 2>&1; check "symlinked store refused (24)" $? 24

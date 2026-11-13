@@ -69,6 +69,8 @@ class H(BaseHTTPRequestHandler):
         if path == "/art/ok.png": return self.send(200, png(1, 1), "image/png")
         if path == "/art/huge.png": return self.send(200, png(20000, 20000), "image/png")
         if path == "/art/noheader.png": return self.send(200, b"\x89PNG\r\n\x1a\n" + b"0" * 64, "image/png")
+        if path == "/art/short.webp": return self.send(200, b"RIFF\0\0\0\0WEBP", "image/webp")
+        if path == "/art/short.jpg": return self.send(200, b"\xff\xd8\xff\xe0\xff", "image/jpeg")
         if path == "/art/text.png": return self.send(200, "<html>not an image</html>", "image/png")
         if path == "/art/big.png": return self.send(200, b"\x89PNG\r\n\x1a\n" + b"0" * 2000000, "image/png")
         if path == "/art/redir.png":
