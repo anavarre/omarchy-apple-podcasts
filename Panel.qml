@@ -551,16 +551,33 @@ Panel {
             font.pixelSize: root.fs(Style.font.body)
             password: true
             placeholderText: "media-user-token"
-            onAccepted: root.submitToken()
+            // Read-only to Qt, so the field never touches the clipboard: a
+            // writable TextInput re-evaluates canPaste on every clipboard
+            // change, and on some Qt builds that pulls the whole offered text
+            // synchronously, unbounded. Typing is done here instead, and
+            // pasting only through pasteToken()'s bounded helper.
+            readOnly: true
             Keys.onEscapePressed: root.close()
-            // Every native paste route is swallowed and sent to pasteToken().
             Keys.onPressed: function(event) {
+              var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
               if (event.matches(StandardKey.Paste)
                   || (event.key === Qt.Key_Insert && (event.modifiers & Qt.ShiftModifier))
-                  || (event.key === Qt.Key_V && (event.modifiers & Qt.ControlModifier))) {
+                  || (event.key === Qt.Key_V && ctrl)) {
                 root.pasteToken(false)
-                event.accepted = true
+              } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.submitToken()
+              } else if (event.key === Qt.Key_Backspace) {
+                tokenField.text = ctrl ? "" : tokenField.text.slice(0, -1)
+              } else if (event.key === Qt.Key_Delete || (event.key === Qt.Key_U && ctrl)) {
+                tokenField.text = ""
+              } else if (!ctrl && (event.modifiers & Qt.AltModifier) === 0
+                  && /^[\x21-\x7e]$/.test(event.text)) {
+                if (tokenField.text.length < root.maxTokenLength) tokenField.text += event.text
+              } else {
+                return
               }
+              tokenField.cursorPosition = tokenField.text.length
+              event.accepted = true
             }
             // Middle click (primary selection) and the context menu would
             // otherwise reach Qt's unbounded paste.

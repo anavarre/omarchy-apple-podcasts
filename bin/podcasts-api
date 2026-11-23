@@ -51,6 +51,21 @@
 set -u
 PATH=/usr/bin:/bin; export PATH
 
+# A signal reaches only this process, and bash defers its traps until the
+# running curl returns, which could be many seconds later. So the command runs
+# in a child while this one waits (wait returns at once on a trapped signal)
+# and passes SIGTERM/HUP/INT on to the whole process group: the shell's
+# watchdog, its unload and its death (setpriv --pdeathsig) all end every curl
+# at once, and the child's EXIT traps still remove temporary files.
+if [ -z "${PODCASTS_API_CHILD:-}" ]; then
+  PODCASTS_API_CHILD=1 /usr/bin/bash "$0" "$@" 0<&0 &
+  child=$!
+  trap 'trap "" TERM HUP INT; kill -TERM 0 2> /dev/null; wait "$child"; exit 143' TERM HUP INT
+  wait "$child"
+  exit $?
+fi
+trap 'exit 143' TERM HUP INT
+
 usage() { printf 'podcasts-api: %s\n' "$1" >&2; exit 64; }
 
 cfg="${XDG_CONFIG_HOME:-}"; case "$cfg" in /*) ;; *) cfg="$HOME/.config" ;; esac

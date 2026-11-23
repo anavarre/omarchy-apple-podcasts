@@ -9,7 +9,7 @@ it with a captured real response once the spike has one.
 Usage: fixture_server.py PORT GOOD_USER_TOKEN
 """
 import base64, json, sys, time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 def b64(d):
@@ -67,6 +67,11 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/art/ok.png": return self.send(200, png(1, 1), "image/png")
+        if path == "/art/slow.png":
+            # Starts an image, then stalls: a download only a signal can end early.
+            self.send_response(200); self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", "4096"); self.end_headers()
+            self.wfile.write(png(1, 1)); self.wfile.flush(); time.sleep(15); return
         if path == "/art/huge.png": return self.send(200, png(20000, 20000), "image/png")
         if path == "/art/noheader.png": return self.send(200, b"\x89PNG\r\n\x1a\n" + b"0" * 64, "image/png")
         if path == "/art/short.webp": return self.send(200, b"RIFF\0\0\0\0WEBP", "image/webp")
@@ -98,4 +103,4 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(EPISODES))
         self.send(404, "{}")
 
-HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()

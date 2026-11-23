@@ -18,7 +18,7 @@ Item {
   // under (stale: the account changed since, so its result must be dropped) and
   // arms a deadline. A helper still running at the deadline is stopped in
   // bounded steps: terminate, then SIGKILL to it and its whole process group
-  // (it runs under setsid, so curl, mpv and the like go with it), then, if even
+  // (it runs under setsid, so curl and the like go with it), then, if even
   // that is not acknowledged, the kill is repeated and the slot stays held until
   // the real exit. One that never reported a start (FailedToStart) gets a
   // synthetic exit. Either way each handler's
@@ -51,7 +51,10 @@ Item {
       op.phase = 0
       op.lost = false
       var c = op.command
-      if (c.length > 0 && c[0] !== "/usr/bin/setsid") op.command = ["/usr/bin/setsid", "-w"].concat(c)
+      // setpriv: if the shell dies, the helper is sent SIGTERM (podcasts-api
+      // passes that on to its whole group). setsid: its own process group.
+      if (c.length > 0 && c[0] !== "/usr/bin/setpriv")
+        op.command = ["/usr/bin/setpriv", "--pdeathsig", "TERM", "--", "/usr/bin/setsid", "-w"].concat(c)
       op.watchdog.interval = op.deadlineMs
       op.watchdog.restart()
       op.running = true
@@ -93,6 +96,14 @@ Item {
       // Not before the handlers have run, and only for the child that exited.
       if (wasArmed) Qt.callLater(function() { if (op.queued && !op.armed) op.launch() })
     })
+    // Unload: Process's destructor stops only the tracked child, and no
+    // watchdog survives to finish the job, so the whole group is told to stop
+    // now. TERM, not KILL, so helpers still remove their temporary files.
+    Component.onDestruction: {
+      op.queued = false
+      if (op.armed && op.processId > 0)
+        Quickshell.execDetached(["/usr/bin/kill", "-TERM", "--", "-" + op.processId])
+    }
     property Timer watchdog: Timer {
       repeat: false
       onTriggered: op.wind()

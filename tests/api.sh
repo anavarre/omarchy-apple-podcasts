@@ -112,6 +112,19 @@ run art "file:///etc/passwd" > /dev/null 2>&1; check "art non-http refused (64)"
 tmpleft=0; for f in "$tmp"/store/art/.tmp*; do [ -e "$f" ] && tmpleft=$((tmpleft + 1)); done
 check "art leaves no temp files" "$tmpleft" 0
 
+# A TERM to the helper (the watchdog, an unload, or the shell's death via
+# --pdeathsig) ends its curl at once and still removes the temp file.
+setsid bash "$here/bin/podcasts-api" art "http://127.0.0.1:$port/art/slow.png" > /dev/null 2>&1 & slow=$!
+for _ in $(seq 50); do ls "$tmp"/store/art/.tmp.* > /dev/null 2>&1 && pgrep -g "$slow" -x curl > /dev/null && break; sleep 0.1; done
+check "slow art download in flight" "$(pgrep -g "$slow" -x curl > /dev/null && echo yes)" yes
+t0=$(date +%s); kill -TERM "$slow"; wait "$slow"; rc=$?
+for _ in $(seq 20); do pgrep -g "$slow" > /dev/null || break; sleep 0.1; done
+check "TERM ends the helper (143)" "$rc" 143
+check "TERM ends it promptly" "$([ $(( $(date +%s) - t0 )) -le 3 ] && echo yes)" yes
+check "TERM leaves no process in its group" "$(pgrep -g "$slow" > /dev/null && echo left || echo none)" none
+tmpleft=0; for f in "$tmp"/store/art/.tmp*; do [ -e "$f" ] && tmpleft=$((tmpleft + 1)); done
+check "TERM leaves no temp file" "$tmpleft" 0
+
 # What a save killed before its rename leaves behind goes too.
 printf '%s' "$good" > "$tmp/store/.media-user-token.abc123"; : > "$tmp/store/.tmp.abc123"; : > "$tmp/store/.dev-token.abc123"
 run forget; check "forget empties store" "$(ls -A "$tmp/store" | wc -l)" 0
